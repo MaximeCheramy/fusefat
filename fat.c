@@ -148,8 +148,12 @@ static directory_t * open_root_dir() {
   directory_t *dir = malloc(sizeof(directory_t));
   fat_dir_entry_t *root_dir = malloc(sizeof(fat_dir_entry_t) * fat_info.BS.root_entry_count);
   dir->total_entries = 0;
+  directory_entry_t ** dir_entry;
 
   read_data(root_dir, sizeof(fat_dir_entry_t) * fat_info.BS.root_entry_count, fat_info.addr_root_dir);
+
+  dir_entry = &dir->entries;
+  *dir_entry = NULL;
 
   int i;
   for (i = 0; i < fat_info.BS.root_entry_count; i++) {
@@ -166,7 +170,10 @@ static directory_t * open_root_dir() {
               ((lfn_entry_t*) &root_dir[i - j]));
           i_filename += 13;
         }
-        fat_dir_entry_to_directory_entry(filename, &root_dir[i], &(dir->entries[dir->total_entries]));
+        *dir_entry = malloc(sizeof(directory_entry_t));
+        fat_dir_entry_to_directory_entry(filename, &root_dir[i], *dir_entry);
+        (*dir_entry)->next = NULL;
+        dir_entry = &((*dir_entry)->next);
         dir->total_entries++;
       } 
     }
@@ -181,19 +188,22 @@ static int open_next_dir(directory_t * prev_dir, directory_t * next_dir, char * 
   fprintf(debug, "open_next_dir, name = %s\n", name);
   fflush(debug);
 
+  directory_entry_t ** dir_entry;
   fat_dir_entry_t sub_dir[16]; // XXX
   int next = 0;
   int i;
 
-  for (i = 0; i < (prev_dir->total_entries); i++) {
-    if (strcmp(prev_dir->entries[i].name, name) == 0) {
-      if ((prev_dir->entries[i].attributes & 0x10) == 0x10) { //c'est bien un repe
-        next = prev_dir->entries[i].cluster;
+  directory_entry_t *dentry = prev_dir->entries;
+  while (dentry) {
+    if (strcmp(dentry->name, name) == 0) {
+      if ((dentry->attributes & 0x10) == 0x10) { //c'est bien un repe
+        next = dentry->cluster;
         break;
       } else {
         return 2;
       }
     }
+    dentry = dentry->next;
   }
 
   if (next == 0) {
@@ -201,6 +211,9 @@ static int open_next_dir(directory_t * prev_dir, directory_t * next_dir, char * 
   }
 
   read_data(sub_dir, sizeof(sub_dir), fat_info.addr_data + (next - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector);
+
+  dir_entry = &next_dir->entries;
+  *dir_entry = NULL;
 
   next_dir->total_entries = 0;
   for (i = 0; i < 16; i++) {
@@ -218,8 +231,10 @@ static int open_next_dir(directory_t * prev_dir, directory_t * next_dir, char * 
               ((lfn_entry_t*) &sub_dir[i - j]));
           i_filename += 13;
         }
-
-        fat_dir_entry_to_directory_entry(filename, &sub_dir[i], &(next_dir->entries[next_dir->total_entries]));
+        *dir_entry = malloc(sizeof(directory_entry_t));
+        fat_dir_entry_to_directory_entry(filename, &sub_dir[i], *dir_entry);
+        (*dir_entry)->next = NULL;
+        dir_entry = &((*dir_entry)->next);
         next_dir->total_entries++;
       }
     }
@@ -296,29 +311,30 @@ static int fat_getattr(const char *path, struct stat *stbuf)
       return -ENOENT;
     free(pathdir);
 
-    int i;
-    for (i = 0; i < dir->total_entries; i++) {
-      if (strcmp(dir->entries[i].name, filename) == 0) {
+    directory_entry_t *dir_entry = dir->entries;
+    while (dir_entry) {
+      if (strcmp(dir_entry->name, filename) == 0) {
           break;
       }
+      dir_entry = dir_entry->next;
     }
-    if (i == dir->total_entries) {
-      free(dir);
+    if (!dir_entry) {
+      free(dir); // TODO: liberer memoire liste chainee.
       return -ENOENT;
     } else {
-      if (dir->entries[i].attributes & 0x01) { // Read Only
+      if (dir_entry->attributes & 0x01) { // Read Only
         stbuf->st_mode &= ~0111;
       }
-      if (dir->entries[i].attributes & 0x10) { // Dir.
+      if (dir_entry->attributes & 0x10) { // Dir.
         stbuf->st_mode |= S_IFDIR;
       } else {
         stbuf->st_mode |= S_IFREG;
       }
-      stbuf->st_atime = dir->entries[i].access_time;
-      stbuf->st_mtime = dir->entries[i].modification_time;
-      stbuf->st_ctime = dir->entries[i].creation_time;
+      stbuf->st_atime = dir_entry->access_time;
+      stbuf->st_mtime = dir_entry->modification_time;
+      stbuf->st_ctime = dir_entry->creation_time;
     }
-    free(dir);
+    free(dir); // TODO: liberer memoire liste chainee.
   }
 
   return res;
@@ -338,10 +354,12 @@ static int fat_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
   if ((dir = open_dir_from_path(path)) == NULL)
     return -ENOENT;
 
-  for (i = 0; i < dir->total_entries; i++) {
-    filler(buf, dir->entries[i].name, NULL, 0);
+  directory_entry_t *dir_entry = dir->entries;
+  while (dir_entry) {
+    filler(buf, dir_entry->name, NULL, 0);
+    dir_entry = dir_entry->next;
   }
-  free(dir);
+  free(dir); // TODO: libérer liste chainée.
 
   filler(buf, ".", NULL, 0);
   filler(buf, "..", NULL, 0);

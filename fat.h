@@ -55,10 +55,11 @@ typedef struct _directory_entry {
   time_t modification_time;
   time_t creation_time;
   uint32_t cluster;
+  struct _directory_entry *next;
 } directory_entry_t;
 
 typedef struct _directory {
-  directory_entry_t entries[10]; // XXX: Valeur arbitraire. Faire liste chainée ?
+  directory_entry_t *entries; 
   int total_entries;
   char name[256];
 } directory_t;
