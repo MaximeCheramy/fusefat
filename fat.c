@@ -125,6 +125,19 @@ static void mount_fat() {
   }
 }
 
+static void fat_dir_entry_to_directory_entry(char *filename, fat_dir_entry_t *dir, directory_entry_t *entry) {
+  strcpy(entry->name, filename);
+  entry->cluster = dir->cluster_pointer;
+  entry->attributes = dir->file_attributes;
+  entry->size = dir->file_size;
+  entry->access_time = 
+      convert_datetime_fat_to_time_t(dir->last_access_date, 0);
+  entry->modification_time =
+      convert_datetime_fat_to_time_t(dir->last_modif_date, dir->last_modif_time);
+  entry->creation_time = 
+      convert_datetime_fat_to_time_t(dir->create_date, dir->create_time);
+}
+
 static directory_t * open_root_dir() {
   directory_t *dir = malloc(sizeof(directory_t));
   fat_dir_entry_t *root_dir = malloc(sizeof(fat_dir_entry_t) * fat_info.BS.root_entry_count);
@@ -136,11 +149,6 @@ static directory_t * open_root_dir() {
 
   int i;
   for (i = 0; i < fat_info.BS.root_entry_count; i++) {
-
-    fprintf(debug, "open_root_dir, name = %s\n", root_dir[i].utf8_short_name);
-    fflush(debug);
-
-
     char filename[256];
     uint8_t i_filename = 0;
     if (root_dir[i].utf8_short_name[0] != 0xE5 &&
@@ -154,19 +162,7 @@ static directory_t * open_root_dir() {
               ((lfn_entry_t*) &root_dir[i - j]));
           i_filename += 13;
         }
-          
-        strcpy(dir->entry_name[dir->total_entries], filename);
-        dir->entry_cluster[dir->total_entries]
-            = root_dir[i].cluster_pointer;
-        dir->entry_size[dir->total_entries] = root_dir[i].file_size;
-        dir->entry_attributes[dir->total_entries]
-            = root_dir[i].file_attributes;
-        dir->entry_access_time[dir->total_entries] = 
-            convert_datetime_fat_to_time_t(root_dir[i].last_access_date, 0);
-        dir->entry_modification_time[dir->total_entries] = 
-            convert_datetime_fat_to_time_t(root_dir[i].last_modif_date, root_dir[i].last_modif_time);
-        dir->entry_creation_time[dir->total_entries] = 
-            convert_datetime_fat_to_time_t(root_dir[i].create_date, root_dir[i].create_time);
+        fat_dir_entry_to_directory_entry(filename, &root_dir[i], &(dir->entries[dir->total_entries]));
         dir->total_entries++;
       } 
     }
@@ -186,18 +182,15 @@ static int open_next_dir(directory_t * prev_dir, directory_t * next_dir, char * 
   int i;
 
   for (i = 0; i < (prev_dir->total_entries); i++) {
-    if (strcmp(prev_dir->entry_name[i], name) == 0) {
-      if ((prev_dir->entry_attributes[i] & 0x10) == 0x10) { //c'est bien un repe
-        next = prev_dir->entry_cluster[i];
+    if (strcmp(prev_dir->entries[i].name, name) == 0) {
+      if ((prev_dir->entries[i].attributes & 0x10) == 0x10) { //c'est bien un repe
+        next = prev_dir->entries[i].cluster;
         break;
       } else {
         return 2;
       }
     }
   }
-
-  fprintf(debug, "open_next_dir: ok, %d\n", next);
-  fflush(debug);
 
   if (next != 0) {
 
@@ -224,21 +217,7 @@ static int open_next_dir(directory_t * prev_dir, directory_t * next_dir, char * 
             i_filename += 13;
           }
 
-          strcpy(next_dir->entry_name[next_dir->total_entries],
-              filename);
-          next_dir->entry_cluster[next_dir->total_entries]
-              = sub_dir[i].cluster_pointer;
-          next_dir->entry_size[next_dir->total_entries]
-              = sub_dir[i].file_size;
-          next_dir->entry_attributes[next_dir->total_entries]
-              = sub_dir[i].file_attributes;
-          next_dir->entry_access_time[next_dir->total_entries] = 
-              convert_datetime_fat_to_time_t(sub_dir[i].last_access_date, 0);
-          next_dir->entry_modification_time[next_dir->total_entries] = 
-              convert_datetime_fat_to_time_t(sub_dir[i].last_modif_date, sub_dir[i].last_modif_time);
-          next_dir->entry_creation_time[next_dir->total_entries] = 
-              convert_datetime_fat_to_time_t(sub_dir[i].create_date, sub_dir[i].create_time);
-
+          fat_dir_entry_to_directory_entry(filename, &sub_dir[i], &(next_dir->entries[next_dir->total_entries]));
           next_dir->total_entries++;
         }
       }
@@ -256,7 +235,6 @@ static void split_dir_filename(const char * path, char * dir, char * filename) {
   } 
   *dir = '\0';
 }
-
 
 static directory_t * open_dir_from_path(const char *path) {
   fprintf(debug, "open_dir_from_path %s\n", path);
@@ -320,7 +298,7 @@ static int fat_getattr(const char *path, struct stat *stbuf)
 
     int i;
     for (i = 0; i < dir->total_entries; i++) {
-      if (strcmp(dir->entry_name[i], filename) == 0) {
+      if (strcmp(dir->entries[i].name, filename) == 0) {
           break;
       }
     }
@@ -328,17 +306,17 @@ static int fat_getattr(const char *path, struct stat *stbuf)
       free(dir);
       return -ENOENT;
     } else {
-      if (dir->entry_attributes[i] & 0x01) { // Read Only
+      if (dir->entries[i].attributes & 0x01) { // Read Only
         stbuf->st_mode &= ~0111;
       }
-      if (dir->entry_attributes[i] & 0x10) { // Dir.
+      if (dir->entries[i].attributes & 0x10) { // Dir.
         stbuf->st_mode |= S_IFDIR;
       } else {
         stbuf->st_mode |= S_IFREG;
       }
-      stbuf->st_atime = dir->entry_access_time[i];
-      stbuf->st_mtime = dir->entry_modification_time[i];
-      stbuf->st_ctime = dir->entry_creation_time[i];
+      stbuf->st_atime = dir->entries[i].access_time;
+      stbuf->st_mtime = dir->entries[i].modification_time;
+      stbuf->st_ctime = dir->entries[i].creation_time;
     }
     free(dir);
   }
@@ -361,7 +339,7 @@ static int fat_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
     return -ENOENT;
 
   for (i = 0; i < dir->total_entries; i++) {
-    filler(buf, dir->entry_name[i], NULL, 0);
+    filler(buf, dir->entries[i].name, NULL, 0);
   }
   free(dir);
 
@@ -388,13 +366,21 @@ static int fat_read(const char *path, char *buf, size_t size, off_t offset,
                       struct fuse_file_info *fi)
 {
   directory_t *dir;
+  int count = 0;
   
   if ((dir = open_dir_from_path(path)) == NULL)
     return -ENOENT;
 
-  int fd = open(options.device, O_RDONLY);
-  pread(fd, sub_dir, sizeof(sub_dir), fat_info.addr_data + (next - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector);
-  close(fd);
+  while (size) {
+    
+  }
+  
+
+/*  int fd = open(options.device, O_RDONLY);
+  pread(fd, dir, sizeof(dir), fat_info.addr_data + (next - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector);
+  close(fd);*/
+
+  return count;
 }
 
 static struct fuse_operations fat_oper = {

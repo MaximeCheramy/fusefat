@@ -47,14 +47,18 @@ typedef struct _fat_dir_entry {
 
 }__attribute__((packed)) fat_dir_entry_t;
 
+typedef struct _directory_entry {
+  char name[256];
+  uint8_t attributes;
+  uint32_t size;
+  time_t access_time;
+  time_t modification_time;
+  time_t creation_time;
+  uint32_t cluster;
+} directory_entry_t;
+
 typedef struct _directory {
-  char entry_name[10][256];
-  unsigned int entry_cluster[10];
-  uint32_t entry_size[10];
-  uint8_t entry_attributes[10];
-  time_t entry_access_time[10];
-  time_t entry_modification_time[10];
-  time_t entry_creation_time[10];
+  directory_entry_t entries[10];
   int total_entries;
   char name[256];
   uint32_t cluster;
