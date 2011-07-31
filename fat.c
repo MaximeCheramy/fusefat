@@ -207,7 +207,7 @@ static int open_next_dir(directory_t * prev_dir, directory_t * next_dir, char * 
     char filename[256];
     uint8_t i_filename = 0;
     if (sub_dir[i].utf8_short_name[0] != 0xE5 &&
-        sub_dir[i].file_attributes == 0x0F) {
+        sub_dir[i].file_attributes == 0x0F) { // TODO: constantes pour les flags.
       if (((lfn_entry_t*) &sub_dir[i])->seq_number & 0x40) {
         int j;
         uint8_t seq = ((lfn_entry_t*) &sub_dir[i])->seq_number
@@ -282,7 +282,7 @@ static int fat_getattr(const char *path, struct stat *stbuf)
   int res = 0;
 
   memset(stbuf, 0, sizeof(struct stat));
-  stbuf->st_nlink = 2;
+  stbuf->st_nlink = 2; // XXX
   stbuf->st_mode = 0755;
 
   if(strcmp(path, "/") == 0) {
@@ -359,6 +359,8 @@ static int fat_open(const char *path, struct fuse_file_info *fi)
   if((fi->flags & 3) != O_RDONLY)
     return -EACCES;
 
+  // TODO
+
   return 0;
 }
 
@@ -375,6 +377,9 @@ static int fat_read(const char *path, char *buf, size_t size, off_t offset,
     
   }
   
+
+  // TODO
+
 
 /*  int fd = open(options.device, O_RDONLY);
   pread(fd, dir, sizeof(dir), fat_info.addr_data + (next - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector);

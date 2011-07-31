@@ -58,7 +58,7 @@ typedef struct _directory_entry {
 } directory_entry_t;
 
 typedef struct _directory {
-  directory_entry_t entries[10];
+  directory_entry_t entries[10]; // XXX: Valeur arbitraire. Faire liste chainée ?
   int total_entries;
   char name[256];
 } directory_t;
