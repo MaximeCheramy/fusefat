@@ -138,14 +138,18 @@ static void fat_dir_entry_to_directory_entry(char *filename, fat_dir_entry_t *di
       convert_datetime_fat_to_time_t(dir->create_date, dir->create_time);
 }
 
+static void read_data(void * buf, size_t count, off_t offset) {
+  int fd = open(options.device, O_RDONLY);
+  pread(fd, buf, count, offset);
+  close(fd);
+}
+
 static directory_t * open_root_dir() {
   directory_t *dir = malloc(sizeof(directory_t));
   fat_dir_entry_t *root_dir = malloc(sizeof(fat_dir_entry_t) * fat_info.BS.root_entry_count);
   dir->total_entries = 0;
 
-  int fd = open(options.device, O_RDONLY);
-  pread(fd, root_dir, sizeof(fat_dir_entry_t) * fat_info.BS.root_entry_count, fat_info.addr_root_dir);
-  close(fd);
+  read_data(root_dir, sizeof(fat_dir_entry_t) * fat_info.BS.root_entry_count, fat_info.addr_root_dir);
 
   int i;
   for (i = 0; i < fat_info.BS.root_entry_count; i++) {
@@ -177,7 +181,7 @@ static int open_next_dir(directory_t * prev_dir, directory_t * next_dir, char * 
   fprintf(debug, "open_next_dir, name = %s\n", name);
   fflush(debug);
 
-  fat_dir_entry_t sub_dir[16];
+  fat_dir_entry_t sub_dir[16]; // XXX
   int next = 0;
   int i;
 
@@ -192,39 +196,35 @@ static int open_next_dir(directory_t * prev_dir, directory_t * next_dir, char * 
     }
   }
 
-  if (next != 0) {
+  if (next == 0) {
+    return 1;
+  }
 
-    int fd = open(options.device, O_RDONLY);
-    pread(fd, sub_dir, sizeof(sub_dir), fat_info.addr_data + (next - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector);
-    close(fd);
+  read_data(sub_dir, sizeof(sub_dir), fat_info.addr_data + (next - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector);
 
-    strcpy(next_dir->name, name);
-    next_dir->cluster = next;
-    next_dir->total_entries = 0;
-    for (i = 0; i < 16; i++) {
-      char filename[256];
-      uint8_t i_filename = 0;
-      if (sub_dir[i].utf8_short_name[0] != 0xE5 &&
-          sub_dir[i].file_attributes == 0x0F) {
-        if (((lfn_entry_t*) &sub_dir[i])->seq_number & 0x40) {
-          int j;
-          uint8_t seq = ((lfn_entry_t*) &sub_dir[i])->seq_number
-              - 0x40;
-          i += seq;
-          for (j = 1; j <= seq; j++) {
-            decode_long_file_name(filename + i_filename,
-                ((lfn_entry_t*) &sub_dir[i - j]));
-            i_filename += 13;
-          }
-
-          fat_dir_entry_to_directory_entry(filename, &sub_dir[i], &(next_dir->entries[next_dir->total_entries]));
-          next_dir->total_entries++;
+  next_dir->total_entries = 0;
+  for (i = 0; i < 16; i++) {
+    char filename[256];
+    uint8_t i_filename = 0;
+    if (sub_dir[i].utf8_short_name[0] != 0xE5 &&
+        sub_dir[i].file_attributes == 0x0F) {
+      if (((lfn_entry_t*) &sub_dir[i])->seq_number & 0x40) {
+        int j;
+        uint8_t seq = ((lfn_entry_t*) &sub_dir[i])->seq_number
+            - 0x40;
+        i += seq;
+        for (j = 1; j <= seq; j++) {
+          decode_long_file_name(filename + i_filename,
+              ((lfn_entry_t*) &sub_dir[i - j]));
+          i_filename += 13;
         }
+
+        fat_dir_entry_to_directory_entry(filename, &sub_dir[i], &(next_dir->entries[next_dir->total_entries]));
+        next_dir->total_entries++;
       }
     }
-    return 0;
-  } else
-    return 1;
+  }
+  return 0;
 }
 
 static void split_dir_filename(const char * path, char * dir, char * filename) {

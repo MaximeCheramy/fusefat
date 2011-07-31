@@ -61,7 +61,6 @@ typedef struct _directory {
   directory_entry_t entries[10];
   int total_entries;
   char name[256];
-  uint32_t cluster;
 } directory_t;
 
 typedef struct {
