@@ -144,39 +144,43 @@ static void read_data(void * buf, size_t count, off_t offset) {
   close(fd);
 }
 
+static void read_dir_entry(fat_dir_entry_t *fdir, directory_t *dir, int *i) {
+  directory_entry_t * dir_entry;
+
+  char filename[256];
+  uint8_t i_filename = 0;
+  if (fdir[*i].utf8_short_name[0] != 0xE5 &&
+      fdir[*i].file_attributes == 0x0F) {
+    if (((lfn_entry_t*) &fdir[*i])->seq_number & 0x40) {
+      int j;
+      uint8_t seq = ((lfn_entry_t*) &fdir[*i])->seq_number - 0x40;
+      *i += seq;
+      for (j = 1; j <= seq; j++) {
+        decode_long_file_name(filename + i_filename,
+            ((lfn_entry_t*) &fdir[*i - j]));
+        i_filename += 13;
+      }
+      dir_entry = malloc(sizeof(directory_entry_t));
+      fat_dir_entry_to_directory_entry(filename, &fdir[*i], dir_entry);
+      dir_entry->next = dir->entries;
+      dir->entries = dir_entry;
+      dir->total_entries++;
+    } 
+  }
+}
+
 static directory_t * open_root_dir() {
   directory_t *dir = malloc(sizeof(directory_t));
   fat_dir_entry_t *root_dir = malloc(sizeof(fat_dir_entry_t) * fat_info.BS.root_entry_count);
-  dir->total_entries = 0;
-  directory_entry_t ** dir_entry;
 
   read_data(root_dir, sizeof(fat_dir_entry_t) * fat_info.BS.root_entry_count, fat_info.addr_root_dir);
 
-  dir_entry = &dir->entries;
-  *dir_entry = NULL;
+  dir->total_entries = 0;
+  dir->entries = NULL;
 
   int i;
   for (i = 0; i < fat_info.BS.root_entry_count; i++) {
-    char filename[256];
-    uint8_t i_filename = 0;
-    if (root_dir[i].utf8_short_name[0] != 0xE5 &&
-        root_dir[i].file_attributes == 0x0F) {
-      if (((lfn_entry_t*) &root_dir[i])->seq_number & 0x40) {
-        int j;
-        uint8_t seq = ((lfn_entry_t*) &root_dir[i])->seq_number - 0x40;
-        i += seq;
-        for (j = 1; j <= seq; j++) {
-          decode_long_file_name(filename + i_filename,
-              ((lfn_entry_t*) &root_dir[i - j]));
-          i_filename += 13;
-        }
-        *dir_entry = malloc(sizeof(directory_entry_t));
-        fat_dir_entry_to_directory_entry(filename, &root_dir[i], *dir_entry);
-        (*dir_entry)->next = NULL;
-        dir_entry = &((*dir_entry)->next);
-        dir->total_entries++;
-      } 
-    }
+    read_dir_entry(root_dir, dir, &i);
   }
 
   free(root_dir);
@@ -188,7 +192,6 @@ static int open_next_dir(directory_t * prev_dir, directory_t * next_dir, char * 
   fprintf(debug, "open_next_dir, name = %s\n", name);
   fflush(debug);
 
-  directory_entry_t ** dir_entry;
   fat_dir_entry_t sub_dir[16]; // XXX
   int next = 0;
   int i;
@@ -212,32 +215,11 @@ static int open_next_dir(directory_t * prev_dir, directory_t * next_dir, char * 
 
   read_data(sub_dir, sizeof(sub_dir), fat_info.addr_data + (next - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector);
 
-  dir_entry = &next_dir->entries;
-  *dir_entry = NULL;
-
   next_dir->total_entries = 0;
+  next_dir->entries = NULL;
+
   for (i = 0; i < 16; i++) {
-    char filename[256];
-    uint8_t i_filename = 0;
-    if (sub_dir[i].utf8_short_name[0] != 0xE5 &&
-        sub_dir[i].file_attributes == 0x0F) { // TODO: constantes pour les flags.
-      if (((lfn_entry_t*) &sub_dir[i])->seq_number & 0x40) {
-        int j;
-        uint8_t seq = ((lfn_entry_t*) &sub_dir[i])->seq_number
-            - 0x40;
-        i += seq;
-        for (j = 1; j <= seq; j++) {
-          decode_long_file_name(filename + i_filename,
-              ((lfn_entry_t*) &sub_dir[i - j]));
-          i_filename += 13;
-        }
-        *dir_entry = malloc(sizeof(directory_entry_t));
-        fat_dir_entry_to_directory_entry(filename, &sub_dir[i], *dir_entry);
-        (*dir_entry)->next = NULL;
-        dir_entry = &((*dir_entry)->next);
-        next_dir->total_entries++;
-      }
-    }
+    read_dir_entry(sub_dir, next_dir, &i);
   }
   return 0;
 }
