@@ -270,6 +270,24 @@ static directory_t * open_dir_from_path(const char *path) {
   return dir;
 }
 
+static directory_entry_t * open_file_from_path(const char *path) {
+  char * dir = malloc(strlen(path));
+  char filename[256];
+  split_dir_filename(path, dir, filename);
+
+  directory_t * directory = open_dir_from_path(dir);
+  free(dir);
+
+  directory_entry_t *dir_entry = directory->entries;
+  while (dir_entry) {
+    if (strcmp(dir_entry->name, filename) == 0)
+      return dir_entry;
+    dir_entry = dir_entry->next;
+  }
+
+  return NULL;
+}
+
 
 static int fat_getattr(const char *path, struct stat *stbuf)
 {
@@ -315,6 +333,7 @@ static int fat_getattr(const char *path, struct stat *stbuf)
       stbuf->st_atime = dir_entry->access_time;
       stbuf->st_mtime = dir_entry->modification_time;
       stbuf->st_ctime = dir_entry->creation_time;
+      stbuf->st_size = dir_entry->size;
     }
     free(dir); // TODO: liberer memoire liste chainee.
   }
@@ -351,13 +370,15 @@ static int fat_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 
 static int fat_open(const char *path, struct fuse_file_info *fi)
 {
-  directory_t *dir;
+  directory_entry_t *f;
 
-  if ((dir = open_dir_from_path(path)) == NULL)
+  if ((f = open_file_from_path(path)) == NULL)
     return -ENOENT;
 
   if((fi->flags & 3) != O_RDONLY)
     return -EACCES;
+
+  free(f);
 
   // TODO
 
@@ -367,23 +388,52 @@ static int fat_open(const char *path, struct fuse_file_info *fi)
 static int fat_read(const char *path, char *buf, size_t size, off_t offset,
                       struct fuse_file_info *fi)
 {
-  directory_t *dir;
+  directory_entry_t *f;
   int count = 0;
   
-  if ((dir = open_dir_from_path(path)) == NULL)
+  if ((f = open_file_from_path(path)) == NULL)
     return -ENOENT;
 
-  while (size) {
-    
+  if (offset >= f->size) {
+    return 0;
   }
+
+  if (size + offset > f->size) {
+    size = f->size - offset;
+  }
+
+  int fd = open(options.device, O_RDONLY);
+
+  int cluster = f->cluster;
+
+  // Offset
+  if (offset > 0) {
+    while (offset > fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector) {
+      cluster = fat_info.file_alloc_table[cluster];
+      offset -= fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector;
+    }
+    size_t size2 = fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector - offset;
+    if (size2 > size)
+      size2 = size;
+    pread(fd, buf, size2, fat_info.addr_data + offset + (cluster - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector);
+    size -= size2;
+    count += size2;
+    cluster = fat_info.file_alloc_table[cluster];
+  }
+
+  while (size) {
+    size_t size2 = fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector;
+    if (size2 > size)
+      size2 = size;
+    pread(fd, buf + count, size2, fat_info.addr_data + offset + (cluster - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector);
+    size -= size2;
+    count += size2;
+    cluster = fat_info.file_alloc_table[cluster];
+  } 
   
+  close(fd);
 
-  // TODO
-
-
-/*  int fd = open(options.device, O_RDONLY);
-  pread(fd, dir, sizeof(dir), fat_info.addr_data + (next - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector);
-  close(fd);*/
+  free(f);
 
   return count;
 }

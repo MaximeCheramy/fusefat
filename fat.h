@@ -47,6 +47,17 @@ typedef struct _fat_dir_entry {
 
 }__attribute__((packed)) fat_dir_entry_t;
 
+typedef struct {
+  uint8_t   seq_number;
+  uint8_t   filename1[10];
+  uint8_t   attributes;
+  uint8_t   reserved; // always 0x0
+  uint8_t   checksum;
+  uint8_t   filename2[12];
+  uint16_t  cluster_pointer; // always 0x000
+  uint8_t   filename3[4];
+}__attribute__((packed)) lfn_entry_t;
+
 typedef struct _directory_entry {
   char name[256];
   uint8_t attributes;
@@ -63,18 +74,6 @@ typedef struct _directory {
   int total_entries;
   char name[256];
 } directory_t;
-
-typedef struct {
-  uint8_t   seq_number;
-  uint8_t   filename1[10];
-  uint8_t   attributes;
-  uint8_t   reserved; // always 0x0
-  uint8_t   checksum;
-  uint8_t   filename2[12];
-  uint16_t  cluster_pointer; // always 0x000
-  uint8_t   filename3[4];
-}__attribute__((packed)) lfn_entry_t;
-
 
 typedef struct _fat_info {
   fat_BS_t BS;
