@@ -85,9 +85,4 @@ typedef struct _fat_info {
   unsigned int total_clusters;
 } fat_info_t;
 
-typedef struct _path {
-  int n_dirs;
-  char** names;
-} path_t;
-
 #endif
