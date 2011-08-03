@@ -114,7 +114,16 @@ static void mount_fat() {
     else
       fat_info.total_data_clusters = fat_info.BS.total_sectors_32 / fat_info.BS.sectors_per_cluster - fat_info.addr_data / (fat_info.BS.bytes_per_sector * fat_info.BS.sectors_per_cluster);
 
-    fprintf(stderr, "FAT Type :");
+    if (fat_info.total_data_clusters < 4086) {
+      fat_info.fat_type = FAT12;
+      fprintf(stderr, "FAT Type : FAT12\n");
+    } else if (fat_info.total_data_clusters < 65526) {
+      fat_info.fat_type = FAT16;
+      fprintf(stderr, "FAT Type : FAT16\n");
+    } else {
+      fat_info.fat_type = FAT32;
+      fprintf(stderr, "FAT Type : FAT32\n");
+    }
 
     fprintf(stderr, "First FAT starts at byte %u (sector %u)\n", fat_info.addr_fat[0], fat_info.addr_fat[0] / fat_info.BS.bytes_per_sector);
     fprintf(stderr, "Root directory starts at byte %u (sector %u)\n", fat_info.addr_root_dir, fat_info.addr_root_dir / fat_info.BS.bytes_per_sector);
