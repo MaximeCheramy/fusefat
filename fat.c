@@ -77,18 +77,17 @@ static void read_fat() {
   pread(fd, buffer, sizeof(buffer), fat_info.addr_fat[0]);
   close(fd);
 
-  // decodage FAT12
-  for (i = 0; i < fat_info.total_data_clusters; i += 2) {
+  if (fat_info.fat_type == FAT12) {
+    // decodage FAT12
+    for (i = 0; i < fat_info.total_data_clusters; i += 2) {
+      tmp = buffer[p] + (buffer[p + 1] << 8) + (buffer[p + 2] << 16);
 
-    // on interprete les 3 octets comme un little endian (24bits) number
-    tmp = buffer[p] + ((buffer[p + 1] << 8) & 0xFF00) + ((buffer[p + 2]
-        << 16) & 0xFF0000);
+      // on extrait les 2 clusters de 12bits
+      fat_info.file_alloc_table[i] = (tmp & 0xFFF); // 12 least significant bits
+      fat_info.file_alloc_table[i + 1] = (tmp >> 12); // 12 most significant bits
 
-    // on extrait les 2 clusters de 12bits
-    fat_info.file_alloc_table[i] = (tmp & 0xFFF); // 12 least significant bits
-    fat_info.file_alloc_table[i + 1] = (((tmp & 0xFFF000) >> 12) & 0xFFF); // 12 most significant bits
-
-    p += 3;
+      p += 3;
+    }
   }
 }
 
