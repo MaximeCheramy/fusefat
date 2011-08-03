@@ -163,13 +163,13 @@ static void read_data(void * buf, size_t count, off_t offset) {
 }
 
 static void read_dir_entry(fat_dir_entry_t *fdir, directory_t *dir, int *i) {
+// A gerer: si utf8_short_name[0] == 0 alors on arrête.
   directory_entry_t * dir_entry;
 
   char filename[256];
   uint8_t i_filename = 0;
-  if (fdir[*i].utf8_short_name[0] != 0xE5 &&
-      fdir[*i].file_attributes == 0x0F) {
-    if (((lfn_entry_t*) &fdir[*i])->seq_number & 0x40) {
+  if (fdir[*i].utf8_short_name[0] != 0xE5 && fdir[*i].utf8_short_name[0]) {
+    if (fdir[*i].file_attributes == 0x0F && ((lfn_entry_t*) &fdir[*i])->seq_number & 0x40) {
       int j;
       uint8_t seq = ((lfn_entry_t*) &fdir[*i])->seq_number - 0x40;
       *i += seq;
@@ -183,11 +183,13 @@ static void read_dir_entry(fat_dir_entry_t *fdir, directory_t *dir, int *i) {
       dir_entry->next = dir->entries;
       dir->entries = dir_entry;
       dir->total_entries++;
-
-
-      fprintf(debug, "read dir entry %s \n", dir_entry->name);
-      fflush(debug);
-    } 
+    } else {
+      dir_entry = malloc(sizeof(directory_entry_t));
+      fat_dir_entry_to_directory_entry(fdir[*i].utf8_short_name, &fdir[*i], dir_entry);
+      dir_entry->next = dir->entries;
+      dir->entries = dir_entry;
+      dir->total_entries++;
+    }
   }
 }
 
@@ -214,7 +216,7 @@ static int open_next_dir(directory_t * prev_dir, directory_t * next_dir, char * 
   fprintf(debug, "open_next_dir, name = %s\n", name);
   fflush(debug);
 
-  fat_dir_entry_t sub_dir[16]; // XXX
+  fat_dir_entry_t sub_dir[64]; // XXX
   int next = 0;
   int i;
 
@@ -240,7 +242,7 @@ static int open_next_dir(directory_t * prev_dir, directory_t * next_dir, char * 
   next_dir->total_entries = 0;
   next_dir->entries = NULL;
 
-  for (i = 0; i < 16; i++) {
+  for (i = 0; i < 64; i++) {
     read_dir_entry(sub_dir, next_dir, &i);
   }
   return 0;
