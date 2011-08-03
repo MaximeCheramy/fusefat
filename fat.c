@@ -183,6 +183,10 @@ static void read_dir_entry(fat_dir_entry_t *fdir, directory_t *dir, int *i) {
       dir_entry->next = dir->entries;
       dir->entries = dir_entry;
       dir->total_entries++;
+
+
+      fprintf(debug, "read dir entry %s \n", dir_entry->name);
+      fflush(debug);
     } 
   }
 }
@@ -272,17 +276,16 @@ static directory_t * open_dir_from_path(const char *path) {
   int j = 0;
   do {
     if (path[i] == '/' || path[i] == '\0') {
-      while (path[i] == '/')
-        i++;
       buf[j] = '\0';
-      j = 0;
 
-      if (open_next_dir(dir, dir, buf) != 0)
+      if (j > 0 && open_next_dir(dir, dir, buf) != 0)
         return NULL;
+
+      j = 0;
     } else {
       buf[j] = path[i];
+      j++;
     }
-    j++;
   } while (path[i++] != '\0');
 
   return dir;
