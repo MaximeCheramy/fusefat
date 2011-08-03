@@ -88,6 +88,14 @@ static void read_fat() {
 
       p += 3;
     }
+  } else if (fat_info.fat_type == FAT16) {
+    for (i = 0; i < fat_info.total_data_clusters; i++) {
+      fat_info.file_alloc_table[i] = buffer[i * 2] + (buffer[i * 2 + 1] << 8);
+    }
+  } else if (fat_info.fat_type == FAT32) {
+    for (i = 0; i < fat_info.total_data_clusters; i++) {
+      fat_info.file_alloc_table[i] = buffer[i * 4] + (buffer[i * 4 + 1] << 8) + (buffer[i * 4 + 2] << 16) + (buffer[i * 4 + 3] << 24);
+    }
   }
 }
 
