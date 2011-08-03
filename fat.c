@@ -78,7 +78,7 @@ static void read_fat() {
   close(fd);
 
   // decodage FAT12
-  for (i = 0; i < fat_info.total_clusters; i += 2) {
+  for (i = 0; i < fat_info.total_data_clusters; i += 2) {
 
     // on interprete les 3 octets comme un little endian (24bits) number
     tmp = buffer[p] + ((buffer[p + 1] << 8) & 0xFF00) + ((buffer[p + 2]
@@ -110,16 +110,18 @@ static void mount_fat() {
     fat_info.addr_root_dir = (fat_info.BS.reserved_sector_count + fat_info.BS.table_count * fat_info.BS.table_size_16) * fat_info.BS.bytes_per_sector;
     fat_info.addr_data = fat_info.addr_root_dir + (fat_info.BS.root_entry_count * 32);
     if (fat_info.BS.total_sectors_16 > 0)
-      fat_info.total_clusters = fat_info.BS.total_sectors_16 / fat_info.BS.sectors_per_cluster;
+      fat_info.total_data_clusters = fat_info.BS.total_sectors_16 / fat_info.BS.sectors_per_cluster - fat_info.addr_data / (fat_info.BS.bytes_per_sector * fat_info.BS.sectors_per_cluster);
     else
-      fat_info.total_clusters = fat_info.BS.total_sectors_32 / fat_info.BS.sectors_per_cluster;
+      fat_info.total_data_clusters = fat_info.BS.total_sectors_32 / fat_info.BS.sectors_per_cluster - fat_info.addr_data / (fat_info.BS.bytes_per_sector * fat_info.BS.sectors_per_cluster);
+
+    fprintf(stderr, "FAT Type :");
 
     fprintf(stderr, "First FAT starts at byte %u (sector %u)\n", fat_info.addr_fat[0], fat_info.addr_fat[0] / fat_info.BS.bytes_per_sector);
     fprintf(stderr, "Root directory starts at byte %u (sector %u)\n", fat_info.addr_root_dir, fat_info.addr_root_dir / fat_info.BS.bytes_per_sector);
     fprintf(stderr, "Data area starts at byte %u (sector %u)\n", fat_info.addr_data, fat_info.addr_data / fat_info.BS.bytes_per_sector);
-    fprintf(stderr, "Total clusters : %d\n", fat_info.total_clusters);
+    fprintf(stderr, "Total clusters : %d\n", fat_info.total_data_clusters);
 
-    fat_info.file_alloc_table = (unsigned int*) malloc(sizeof(unsigned int) * fat_info.BS.table_size_16 * fat_info.BS.bytes_per_sector);
+    fat_info.file_alloc_table = (unsigned int*) malloc(sizeof(unsigned int) * fat_info.total_data_clusters);
 
     read_fat();
   }
@@ -380,8 +382,6 @@ static int fat_open(const char *path, struct fuse_file_info *fi)
 
   free(f);
 
-  // TODO
-
   return 0;
 }
 
@@ -425,7 +425,7 @@ static int fat_read(const char *path, char *buf, size_t size, off_t offset,
     size_t size2 = fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector;
     if (size2 > size)
       size2 = size;
-    pread(fd, buf + count, size2, fat_info.addr_data + offset + (cluster - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector);
+    pread(fd, buf + count, size2, fat_info.addr_data + (cluster - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector);
     size -= size2;
     count += size2;
     cluster = fat_info.file_alloc_table[cluster];

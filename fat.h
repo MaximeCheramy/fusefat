@@ -75,13 +75,20 @@ typedef struct _directory {
   char name[256];
 } directory_t;
 
+typedef enum {
+  FAT12,
+  FAT16,
+  FAT32
+} fat_t;
+
 typedef struct _fat_info {
   fat_BS_t BS;
   unsigned int *addr_fat;
   unsigned int addr_root_dir;
   unsigned int addr_data;
   unsigned int *file_alloc_table;
-  unsigned int total_clusters;
+  unsigned int total_data_clusters;
+  fat_t fat_type;
 } fat_info_t;
 
 #endif
