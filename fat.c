@@ -269,11 +269,35 @@ static directory_t * open_root_dir() {
   return dir;
 }
 
+static int is_free_cluster(int cluster) {
+  return cluster == 0;
+}
+
+static int is_last_cluster(int cluster) {
+  if (fat_info.fat_type == FAT12) {
+    return cluster >= 0xFF8 && cluster <= 0xFFF;
+  } else if (fat_info.fat_type == FAT16) {
+    return cluster >= 0xFFF8 && cluster <= 0xFFFF;
+  } else {
+    return cluster >= 0x0FFFFFF8 && cluster <= 0x0FFFFFFF;
+  }
+}
+
+static int is_used_cluster(int cluster) {
+  if (fat_info.fat_type == FAT12) {
+    return cluster >= 0x002 && cluster <= 0xFEF;
+  } else if (fat_info.fat_type == FAT16) {
+    return cluster >= 0x0002 && cluster <= 0xFFEF;
+  } else {
+    return cluster >= 0x00000002 && cluster <= 0x0FFFFFEF;
+  }
+}
+
 static int open_next_dir(directory_t * prev_dir, directory_t * next_dir, char * name) {
   fprintf(debug, "open_next_dir, name = %s\n", name);
   fflush(debug);
 
-  fat_dir_entry_t sub_dir[64]; // XXX
+  int n_dir_entries = fat_info.BS.bytes_per_sector * fat_info.BS.sectors_per_cluster / sizeof(fat_dir_entry_t);
   int next = 0;
   int i;
 
@@ -293,13 +317,27 @@ static int open_next_dir(directory_t * prev_dir, directory_t * next_dir, char * 
   if (next == 0) {
     return 1;
   }
+ 
+  int n_clusters = 0;
+  int cluster = next;
+  while (!is_last_cluster(cluster)) {
+    cluster = fat_info.file_alloc_table[cluster];
+    n_clusters++;
+  }
 
-  read_data(sub_dir, sizeof(sub_dir), fat_info.addr_data + (next - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector);
+  fat_dir_entry_t * sub_dir = malloc(n_dir_entries * sizeof(fat_dir_entry_t) * n_clusters);
+
+  int c = 0;
+  while (!is_last_cluster(next)) {
+    read_data(sub_dir + c * n_dir_entries, n_dir_entries * sizeof(fat_dir_entry_t), fat_info.addr_data + (next - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector);
+    next = fat_info.file_alloc_table[next];
+    c++;
+  }
 
   next_dir->total_entries = 0;
   next_dir->entries = NULL;
 
-  for (i = 0; i < 64; i++) {
+  for (i = 0; i < n_dir_entries * n_clusters; i++) {
     read_dir_entry(sub_dir, next_dir, &i);
   }
   return 0;
