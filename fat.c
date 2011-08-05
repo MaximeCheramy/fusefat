@@ -5,6 +5,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
+#include <unistd.h>
 
 #include "fat.h"
 
@@ -22,7 +24,62 @@ FILE* debug;
 
 static fat_info_t fat_info;
 
-char * decode_long_file_name(char * name, lfn_entry_t * long_file_name) {
+static char * lfn_to_sfn(char * filename) {
+  char * lfn = strdup(filename);
+  char * sfn = malloc(13);
+
+  char * ext = strrchr(lfn, '.');
+
+  // To upper case.
+  int i = 0;
+  while (lfn[i] != '\0') {
+    lfn[i] = toupper(lfn[i]);
+    i++;
+  }
+
+  // TODO: Convert to OEM (=> '_').
+
+  // Strip all leading and embedded spaces
+  int j = 0;
+  i = 0;
+  while (lfn[i] != '\0') {
+    if (lfn[i] != ' ') {
+      lfn[j] = lfn[i];
+      j++;
+    }
+    i++;
+  }
+  lfn[j] = '\0';
+
+  int has_ext = (ext != NULL) && (lfn + j - ext - 1 <= 3);
+
+  // Copy first 8 caracters.
+  i = 0;
+  j = 0;
+  while (&lfn[i] <= ext) {
+    if (lfn[i] != '.' && j < 8) {
+      sfn[j] = lfn[i];
+      j++;
+    }
+    i++;
+  }
+
+  // Copy extension.
+  if (has_ext) {
+    sfn[j++] = '.';
+    while (lfn[i] != '\0') {
+      sfn[j++] = lfn[i];
+      i++;
+    }
+  }
+  sfn[j] = '\0';
+
+  // TODO: numeric-tail generation.
+
+  return sfn;
+}
+
+static char * decode_long_file_name(char * name, lfn_entry_t * long_file_name) {
 
   name[0] = long_file_name->filename1[0];
   name[1] = long_file_name->filename1[2];
@@ -369,7 +426,6 @@ static int fat_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 {
   (void) offset;
   (void) fi;
-  int i;
   directory_t *dir;
 
   fprintf(debug, "fat_readdir %s\n", path);
