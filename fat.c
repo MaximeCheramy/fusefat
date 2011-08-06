@@ -161,7 +161,6 @@ static void mount_fat() {
   int fd = open(options.device, O_RDONLY);
   if (fd > 0) {
     pread(fd, &fat_info.BS, sizeof(fat_info.BS), 0);
-    close(fd);
  
     fprintf(stderr, "%d bytes per logical sector\n", fat_info.BS.bytes_per_sector);
     fprintf(stderr, "%d bytes per clusters\n", fat_info.BS.bytes_per_sector * fat_info.BS.sectors_per_cluster);
@@ -188,6 +187,17 @@ static void mount_fat() {
       fat_info.fat_type = FAT32;
       fprintf(stderr, "FAT Type : FAT32\n");
     }
+
+    if (fat_info.fat_type == FAT32) {
+      fat_info.ext_BIOS_16 = NULL;
+      fat_info.ext_BIOS_32 = malloc(sizeof(fat_extended_BIOS_32_t));
+      pread(fd, fat_info.ext_BIOS_32, sizeof(fat_extended_BIOS_32_t), 0);
+    } else {
+      fat_info.ext_BIOS_32 = NULL;
+      fat_info.ext_BIOS_16 = malloc(sizeof(fat_extended_BIOS_16_t));
+      pread(fd, fat_info.ext_BIOS_16, sizeof(fat_extended_BIOS_16_t), 0);
+    }
+    close(fd);
 
     fprintf(stderr, "First FAT starts at byte %u (sector %u)\n", fat_info.addr_fat[0], fat_info.addr_fat[0] / fat_info.BS.bytes_per_sector);
     fprintf(stderr, "Root directory starts at byte %u (sector %u)\n", fat_info.addr_root_dir, fat_info.addr_root_dir / fat_info.BS.bytes_per_sector);

@@ -19,16 +19,38 @@ typedef struct _fat_BS {
   uint16_t  head_side_count;      //0x1a
   uint32_t  hidden_sector_count;    //0x1c
   uint32_t  total_sectors_32;     //0x20
+} __attribute__ ((packed)) fat_BS_t; 
 
+typedef struct _fat_extended_BIOS_16 {
 // Extended BIOS Parameter Block (FAT12 / FAT16)
   uint8_t   bios_drive_num;       //0x24
   uint8_t   reserved;         //0x25
-  uint8_t   boot_signature;       //0x26
+  uint8_t   ext_boot_signature;       //0x26
   uint32_t  volume_id;          //0x27
   uint8_t   volume_label[11];     //0x2b
   uint8_t   fat_type_label[8];      //0x36
   uint8_t   os_boot_code[448];      //0x3e
-} __attribute__ ((packed)) fat_BS_t;  
+  uint16_t  boot_sector_sign;     //0x1fe
+} __attribute__ ((packed)) fat_extended_BIOS_16_t;
+
+typedef struct _fat_extended_BIOS_32 {
+// Extended BIOS Parameter Block (FAT32)
+  uint32_t  table_size_32;       //0x24
+  uint16_t  fat_flags;           //0x28
+  uint16_t  version;             //0x2a
+  uint32_t  cluster_root_dir;    //0x2c
+  uint16_t  sector_fs_info;      //0x30
+  uint16_t  sector_bs_backup;    //0x32
+  uint8_t   reserved[12];        //0x34
+  uint8_t   bios_drive_num;      //0x40
+  uint8_t   reserved2;           //0x41
+  uint8_t   ext_boot_signature;  //0x42
+  uint32_t  volume_id;           //0x43
+  uint8_t   volume_label[11];    //0x47
+  uint8_t   fat_type_label[8];   //0x52
+  uint8_t   os_boot_code[420];   //0x5a
+  uint16_t  boot_sector_sign;    //0x1fe
+} __attribute__ ((packed)) fat_extended_BIOS_32_t;
 
 typedef struct _fat_dir_entry {
   uint8_t   utf8_short_name[8];
@@ -83,6 +105,8 @@ typedef enum {
 
 typedef struct _fat_info {
   fat_BS_t BS;
+  fat_extended_BIOS_16_t *ext_BIOS_16;
+  fat_extended_BIOS_32_t *ext_BIOS_32;
   unsigned int *addr_fat;
   unsigned int addr_root_dir;
   unsigned int addr_data;
