@@ -102,6 +102,30 @@ static char * decode_long_file_name(char * name, lfn_entry_t * long_file_name) {
   return name;
 }
 
+static int is_free_cluster(int cluster) {
+  return cluster == 0;
+}
+
+static int is_last_cluster(int cluster) {
+  if (fat_info.fat_type == FAT12) {
+    return cluster >= 0xFF8 && cluster <= 0xFFF;
+  } else if (fat_info.fat_type == FAT16) {
+    return cluster >= 0xFFF8 && cluster <= 0xFFFF;
+  } else {
+    return cluster >= 0x0FFFFFF8 && cluster <= 0x0FFFFFFF;
+  }
+}
+
+static int is_used_cluster(int cluster) {
+  if (fat_info.fat_type == FAT12) {
+    return cluster >= 0x002 && cluster <= 0xFEF;
+  } else if (fat_info.fat_type == FAT16) {
+    return cluster >= 0x0002 && cluster <= 0xFFEF;
+  } else {
+    return cluster >= 0x00000002 && cluster <= 0x0FFFFFEF;
+  }
+}
+
 static time_t convert_datetime_fat_to_time_t(uint16_t date, uint16_t time) {
   int day = date & 0x1f;
   int month = (date & 0x1e0) >> 5;
@@ -202,7 +226,6 @@ static void mount_fat() {
       fprintf(stderr, "FAT Type : FAT16\n");
     } else {
       fat_info.fat_type = FAT32;
-      fat_info.addr_root_dir = fat_info.addr_data + (fat_info.ext_BIOS_32->cluster_root_dir - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector;
       fprintf(stderr, "FAT Type : FAT32\n");
     }
 
@@ -297,52 +320,55 @@ static void read_dir_entries(fat_dir_entry_t *fdir, directory_t *dir, int n) {
   }
 }
 
-static directory_t * open_root_dir() {
-  // TODO: gérer FAT32
-  directory_t *dir = malloc(sizeof(directory_t));
-  fat_dir_entry_t *root_dir = malloc(sizeof(fat_dir_entry_t) * fat_info.BS.root_entry_count);
+static void open_dir(int cluster, directory_t *dir) {
+  int n_clusters = 0;
+  int next = cluster;
+  while (!is_last_cluster(cluster)) {
+    cluster = fat_info.file_alloc_table[cluster];
+    n_clusters++;
+  }
 
-  read_data(root_dir, sizeof(fat_dir_entry_t) * fat_info.BS.root_entry_count, fat_info.addr_root_dir);
+  int n_dir_entries = fat_info.BS.bytes_per_sector * fat_info.BS.sectors_per_cluster / sizeof(fat_dir_entry_t);
+  fat_dir_entry_t * sub_dir = malloc(n_dir_entries * sizeof(fat_dir_entry_t) * n_clusters);
+
+  int c = 0;
+  while (!is_last_cluster(next)) {
+    read_data(sub_dir + c * n_dir_entries, n_dir_entries * sizeof(fat_dir_entry_t), fat_info.addr_data + (next - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector);
+    next = fat_info.file_alloc_table[next];
+    c++;
+  }
 
   dir->total_entries = 0;
   dir->entries = NULL;
 
-  read_dir_entries(root_dir, dir, fat_info.BS.root_entry_count);
+  read_dir_entries(sub_dir, dir, n_dir_entries * n_clusters);
+}
 
-  free(root_dir);
+static directory_t * open_root_dir() {
+  directory_t *dir = malloc(sizeof(directory_t));
+
+  if (fat_info.fat_type == FAT32) {
+    open_dir(fat_info.ext_BIOS_32->cluster_root_dir, dir);
+  } else {
+    fat_dir_entry_t *root_dir = malloc(sizeof(fat_dir_entry_t) * fat_info.BS.root_entry_count);
+  
+    read_data(root_dir, sizeof(fat_dir_entry_t) * fat_info.BS.root_entry_count, fat_info.addr_root_dir);
+  
+    dir->total_entries = 0;
+    dir->entries = NULL;
+  
+    read_dir_entries(root_dir, dir, fat_info.BS.root_entry_count);
+  
+    free(root_dir);
+  }
 
   return dir;
-}
-
-static int is_free_cluster(int cluster) {
-  return cluster == 0;
-}
-
-static int is_last_cluster(int cluster) {
-  if (fat_info.fat_type == FAT12) {
-    return cluster >= 0xFF8 && cluster <= 0xFFF;
-  } else if (fat_info.fat_type == FAT16) {
-    return cluster >= 0xFFF8 && cluster <= 0xFFFF;
-  } else {
-    return cluster >= 0x0FFFFFF8 && cluster <= 0x0FFFFFFF;
-  }
-}
-
-static int is_used_cluster(int cluster) {
-  if (fat_info.fat_type == FAT12) {
-    return cluster >= 0x002 && cluster <= 0xFEF;
-  } else if (fat_info.fat_type == FAT16) {
-    return cluster >= 0x0002 && cluster <= 0xFFEF;
-  } else {
-    return cluster >= 0x00000002 && cluster <= 0x0FFFFFEF;
-  }
 }
 
 static int open_next_dir(directory_t * prev_dir, directory_t * next_dir, char * name) {
   fprintf(debug, "open_next_dir, name = %s\n", name);
   fflush(debug);
 
-  int n_dir_entries = fat_info.BS.bytes_per_sector * fat_info.BS.sectors_per_cluster / sizeof(fat_dir_entry_t);
   int next = 0;
   int i;
 
@@ -363,26 +389,7 @@ static int open_next_dir(directory_t * prev_dir, directory_t * next_dir, char * 
     return 1;
   }
  
-  int n_clusters = 0;
-  int cluster = next;
-  while (!is_last_cluster(cluster)) {
-    cluster = fat_info.file_alloc_table[cluster];
-    n_clusters++;
-  }
-
-  fat_dir_entry_t * sub_dir = malloc(n_dir_entries * sizeof(fat_dir_entry_t) * n_clusters);
-
-  int c = 0;
-  while (!is_last_cluster(next)) {
-    read_data(sub_dir + c * n_dir_entries, n_dir_entries * sizeof(fat_dir_entry_t), fat_info.addr_data + (next - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector);
-    next = fat_info.file_alloc_table[next];
-    c++;
-  }
-
-  next_dir->total_entries = 0;
-  next_dir->entries = NULL;
-
-  read_dir_entries(sub_dir, next_dir, n_dir_entries * n_clusters);
+  open_dir(next, next_dir);
 
   return 0;
 }
