@@ -124,7 +124,7 @@ static time_t convert_datetime_fat_to_time_t(uint16_t date, uint16_t time) {
 }
 
 static void read_fat() {
-  uint8_t buffer[fat_info.BS.bytes_per_sector * fat_info.BS.table_size_16];
+  uint8_t buffer[fat_info.BS.bytes_per_sector * fat_info.table_size];
   
   uint32_t i;
   int p = 0;
@@ -160,17 +160,34 @@ static void mount_fat() {
   fprintf(stderr, "Mount FAT.\n");
   int fd = open(options.device, O_RDONLY);
   if (fd > 0) {
-    pread(fd, &fat_info.BS, sizeof(fat_info.BS), 0);
- 
+    pread(fd, &fat_info.BS, sizeof(fat_BS_t), 0);
+    
+    if (fat_info.BS.table_size_16 == 0) { // Si 0 alors on considère qu'on est en FAT32.
+      fat_info.ext_BIOS_16 = NULL;
+      fat_info.ext_BIOS_32 = malloc(sizeof(fat_extended_BIOS_32_t));
+      pread(fd, fat_info.ext_BIOS_32, sizeof(fat_extended_BIOS_32_t), sizeof(fat_BS_t));
+      fat_info.table_size = fat_info.ext_BIOS_32->table_size_32;
+    } else {
+      fat_info.ext_BIOS_32 = NULL;
+      fat_info.ext_BIOS_16 = malloc(sizeof(fat_extended_BIOS_16_t));
+      pread(fd, fat_info.ext_BIOS_16, sizeof(fat_extended_BIOS_16_t), sizeof(fat_BS_t));
+      fat_info.table_size = fat_info.BS.table_size_16;
+    }
+    close(fd);
+
+    fprintf(stderr, "table size : %d\n", fat_info.table_size);
+
+
     fprintf(stderr, "%d bytes per logical sector\n", fat_info.BS.bytes_per_sector);
     fprintf(stderr, "%d bytes per clusters\n", fat_info.BS.bytes_per_sector * fat_info.BS.sectors_per_cluster);
  
     fat_info.addr_fat = (unsigned int*) malloc(sizeof(unsigned int) * fat_info.BS.table_count);
+    
     int i;
     for (i = 0; i < fat_info.BS.table_count; i++) {
-      fat_info.addr_fat[i] = (fat_info.BS.reserved_sector_count + i * fat_info.BS.table_size_16) * fat_info.BS.bytes_per_sector;
+      fat_info.addr_fat[i] = (fat_info.BS.reserved_sector_count + i * fat_info.table_size) * fat_info.BS.bytes_per_sector;
     }
-    fat_info.addr_root_dir = (fat_info.BS.reserved_sector_count + fat_info.BS.table_count * fat_info.BS.table_size_16) * fat_info.BS.bytes_per_sector;
+    fat_info.addr_root_dir = (fat_info.BS.reserved_sector_count + fat_info.BS.table_count * fat_info.table_size) * fat_info.BS.bytes_per_sector;
     fat_info.addr_data = fat_info.addr_root_dir + (fat_info.BS.root_entry_count * 32);
     if (fat_info.BS.total_sectors_16 > 0)
       fat_info.total_data_clusters = fat_info.BS.total_sectors_16 / fat_info.BS.sectors_per_cluster - fat_info.addr_data / (fat_info.BS.bytes_per_sector * fat_info.BS.sectors_per_cluster);
@@ -185,19 +202,9 @@ static void mount_fat() {
       fprintf(stderr, "FAT Type : FAT16\n");
     } else {
       fat_info.fat_type = FAT32;
+      fat_info.addr_root_dir = fat_info.addr_data + (fat_info.ext_BIOS_32->cluster_root_dir - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector;
       fprintf(stderr, "FAT Type : FAT32\n");
     }
-
-    if (fat_info.fat_type == FAT32) {
-      fat_info.ext_BIOS_16 = NULL;
-      fat_info.ext_BIOS_32 = malloc(sizeof(fat_extended_BIOS_32_t));
-      pread(fd, fat_info.ext_BIOS_32, sizeof(fat_extended_BIOS_32_t), 0);
-    } else {
-      fat_info.ext_BIOS_32 = NULL;
-      fat_info.ext_BIOS_16 = malloc(sizeof(fat_extended_BIOS_16_t));
-      pread(fd, fat_info.ext_BIOS_16, sizeof(fat_extended_BIOS_16_t), 0);
-    }
-    close(fd);
 
     fprintf(stderr, "First FAT starts at byte %u (sector %u)\n", fat_info.addr_fat[0], fat_info.addr_fat[0] / fat_info.BS.bytes_per_sector);
     fprintf(stderr, "Root directory starts at byte %u (sector %u)\n", fat_info.addr_root_dir, fat_info.addr_root_dir / fat_info.BS.bytes_per_sector);

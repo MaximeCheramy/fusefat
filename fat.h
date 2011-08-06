@@ -112,6 +112,7 @@ typedef struct _fat_info {
   unsigned int addr_data;
   unsigned int *file_alloc_table;
   unsigned int total_data_clusters;
+  unsigned int table_size;
   fat_t fat_type;
 } fat_info_t;
 
