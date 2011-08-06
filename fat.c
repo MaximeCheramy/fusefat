@@ -399,11 +399,17 @@ static directory_entry_t * open_file_from_path(const char *path) {
 
   directory_entry_t *dir_entry = directory->entries;
   while (dir_entry) {
-    if (strcmp(dir_entry->name, filename) == 0)
+    if (strcmp(dir_entry->name, filename) == 0) {
+      free(directory);
+      // TODO: free de la liste chainée.
       return dir_entry;
+    }
     dir_entry = dir_entry->next;
   }
 
+  free(directory);
+  // TODO: free de la liste chainée.
+  
   return NULL;
 }
 
