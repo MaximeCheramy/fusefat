@@ -219,38 +219,43 @@ static void read_data(void * buf, size_t count, off_t offset) {
   close(fd);
 }
 
-static void read_dir_entry(fat_dir_entry_t *fdir, directory_t *dir, int *i) {
-// A gerer: si utf8_short_name[0] == 0 alors on arrête.
-  directory_entry_t * dir_entry;
+static void read_dir_entries(fat_dir_entry_t *fdir, directory_t *dir, int n) {
+  int i;
+  for (i = 0; i < n; i++) {
+    directory_entry_t * dir_entry;
 
-  char filename[256];
-  uint8_t i_filename = 0;
-  if (fdir[*i].utf8_short_name[0] != 0xE5 && fdir[*i].utf8_short_name[0]) {
-    if (fdir[*i].file_attributes == 0x0F && ((lfn_entry_t*) &fdir[*i])->seq_number & 0x40) {
-      int j;
-      uint8_t seq = ((lfn_entry_t*) &fdir[*i])->seq_number - 0x40;
-      *i += seq;
-      for (j = 1; j <= seq; j++) {
-        decode_long_file_name(filename + i_filename,
-            ((lfn_entry_t*) &fdir[*i - j]));
-        i_filename += 13;
+    char filename[256];
+    uint8_t i_filename = 0;
+    if (fdir[i].utf8_short_name[0] == 0) {
+      break;
+    } else if (fdir[i].utf8_short_name[0] != 0xE5) {
+      if (fdir[i].file_attributes == 0x0F && ((lfn_entry_t*) &fdir[i])->seq_number & 0x40) {
+        int j;
+        uint8_t seq = ((lfn_entry_t*) &fdir[i])->seq_number - 0x40;
+        i += seq;
+        for (j = 1; j <= seq; j++) {
+          decode_long_file_name(filename + i_filename,
+              ((lfn_entry_t*) &fdir[i - j]));
+          i_filename += 13;
+        }
+        dir_entry = malloc(sizeof(directory_entry_t));
+        fat_dir_entry_to_directory_entry(filename, &fdir[i], dir_entry);
+        dir_entry->next = dir->entries;
+        dir->entries = dir_entry;
+        dir->total_entries++;
+      } else {
+        dir_entry = malloc(sizeof(directory_entry_t));
+        fat_dir_entry_to_directory_entry(fdir[i].utf8_short_name, &fdir[i], dir_entry);
+        dir_entry->next = dir->entries;
+        dir->entries = dir_entry;
+        dir->total_entries++;
       }
-      dir_entry = malloc(sizeof(directory_entry_t));
-      fat_dir_entry_to_directory_entry(filename, &fdir[*i], dir_entry);
-      dir_entry->next = dir->entries;
-      dir->entries = dir_entry;
-      dir->total_entries++;
-    } else {
-      dir_entry = malloc(sizeof(directory_entry_t));
-      fat_dir_entry_to_directory_entry(fdir[*i].utf8_short_name, &fdir[*i], dir_entry);
-      dir_entry->next = dir->entries;
-      dir->entries = dir_entry;
-      dir->total_entries++;
     }
   }
 }
 
 static directory_t * open_root_dir() {
+  // TODO: gérer FAT32
   directory_t *dir = malloc(sizeof(directory_t));
   fat_dir_entry_t *root_dir = malloc(sizeof(fat_dir_entry_t) * fat_info.BS.root_entry_count);
 
@@ -259,10 +264,7 @@ static directory_t * open_root_dir() {
   dir->total_entries = 0;
   dir->entries = NULL;
 
-  int i;
-  for (i = 0; i < fat_info.BS.root_entry_count; i++) {
-    read_dir_entry(root_dir, dir, &i);
-  }
+  read_dir_entries(root_dir, dir, fat_info.BS.root_entry_count);
 
   free(root_dir);
 
@@ -337,9 +339,8 @@ static int open_next_dir(directory_t * prev_dir, directory_t * next_dir, char * 
   next_dir->total_entries = 0;
   next_dir->entries = NULL;
 
-  for (i = 0; i < n_dir_entries * n_clusters; i++) {
-    read_dir_entry(sub_dir, next_dir, &i);
-  }
+  read_dir_entries(sub_dir, next_dir, n_dir_entries * n_clusters);
+
   return 0;
 }
 
