@@ -116,4 +116,10 @@ typedef struct _fat_info {
   fat_t fat_type;
 } fat_info_t;
 
+
+struct fat_state {
+  
+};
+
+
 #endif

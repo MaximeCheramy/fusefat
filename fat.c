@@ -546,9 +546,6 @@ static int fat_open(const char *path, struct fuse_file_info *fi)
   if ((f = open_file_from_path(path)) == NULL)
     return -ENOENT;
 
-  if((fi->flags & 3) != O_RDONLY)
-    return -EACCES;
-
   free(f);
 
   return 0;
@@ -607,17 +604,72 @@ static int fat_read(const char *path, char *buf, size_t size, off_t offset,
   return count;
 }
 
+static int fat_write (const char *path, const char *buf, size_t size, off_t offset,
+                       struct fuse_file_info *fi)
+{
+  directory_entry_t *f;
+  int count = 0;
+  
+  if ((f = open_file_from_path(path)) == NULL)
+    return -ENOENT;
+
+  if (offset >= f->size) {
+    return 0;
+  }
+
+  if (size + offset > f->size) {
+    size = f->size - offset;
+  }
+
+  int fd = open(options.device, O_WRONLY);
+
+  int cluster = f->cluster;
+
+  // Offset
+  if (offset > 0) {
+    while (offset > fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector) {
+      cluster = fat_info.file_alloc_table[cluster];
+      offset -= fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector;
+    }
+    size_t size2 = fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector - offset;
+    if (size2 > size)
+      size2 = size;
+    pwrite(fd, buf, size2, fat_info.addr_data + offset + (cluster - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector);
+    size -= size2;
+    count += size2;
+    cluster = fat_info.file_alloc_table[cluster];
+  }
+
+  while (size) {
+    size_t size2 = fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector;
+    if (size2 > size)
+      size2 = size;
+    pwrite(fd, buf + count, size2, fat_info.addr_data + (cluster - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector);
+    size -= size2;
+    count += size2;
+    cluster = fat_info.file_alloc_table[cluster];
+  } 
+  
+  close(fd);
+
+  free(f);
+
+  return count;
+}
+
 static struct fuse_operations fat_oper = {
     .getattr  = fat_getattr,
     .readdir  = fat_readdir,
     .open = fat_open,
     .read = fat_read,
+    .write = fat_write,
 };
 
 int main(int argc, char *argv[])
 {
   int ret;
   struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
+  struct fat_state *fat_data;
         
   if (fuse_opt_parse(&args, &options, fat_fuse_opts, NULL) == -1)
     return -1; /** error parsing **/
@@ -627,7 +679,7 @@ int main(int argc, char *argv[])
   debug = fopen("/tmp/debugfuse", "w+");
   mount_fat();
   
-  ret = fuse_main(args.argc, args.argv, &fat_oper);
+  ret = fuse_main(args.argc, args.argv, &fat_oper, fat_data);
   fuse_opt_free_args(&args);
 
   return ret;
