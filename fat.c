@@ -463,6 +463,10 @@ static directory_entry_t * open_file_from_path(const char *path) {
   return NULL;
 }
 
+static int fat_utimens(const char *path, const struct timespec tv[2]) {
+  // TODO.
+  return 0;
+}
 
 static int fat_getattr(const char *path, struct stat *stbuf)
 {
@@ -659,9 +663,10 @@ static int fat_write (const char *path, const char *buf, size_t size, off_t offs
 
 static struct fuse_operations fat_oper = {
     .getattr  = fat_getattr,
-    .readdir  = fat_readdir,
     .open = fat_open,
     .read = fat_read,
+    .readdir  = fat_readdir,
+    .utimens = fat_utimens,
     .write = fat_write,
 };
 
