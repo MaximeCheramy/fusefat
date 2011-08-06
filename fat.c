@@ -244,8 +244,34 @@ static void read_dir_entries(fat_dir_entry_t *fdir, directory_t *dir, int n) {
         dir->entries = dir_entry;
         dir->total_entries++;
       } else {
+        int j;
+        // Copy basis name.
+        for (j = 0; j < 8; j++) {
+          filename[j] = fdir[i].utf8_short_name[j];
+        }
+        
+        // Remove trailing whitespaces.
+        j = 7;
+        while (j >= 0 && filename[j] == ' ') {
+          filename[j] = '\0';
+          j--;
+        }
+
+        // Copy extension.
+        filename[8] = '.';
+        for (j = 0; j < 3; j++) {
+          filename[9 + j] = fdir[i].file_extension[j];
+        }
+
+        // Remove trailing whitespaces in extension.
+        j = 2;
+        while (j >= 0 && filename[9 + j] == ' ') {
+          filename[9 + j] = '\0';
+          j--;
+        }
+
         dir_entry = malloc(sizeof(directory_entry_t));
-        fat_dir_entry_to_directory_entry(fdir[i].utf8_short_name, &fdir[i], dir_entry);
+        fat_dir_entry_to_directory_entry(filename, &fdir[i], dir_entry);
         dir_entry->next = dir->entries;
         dir->entries = dir_entry;
         dir->total_entries++;
@@ -485,9 +511,6 @@ static int fat_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
     dir_entry = dir_entry->next;
   }
   free(dir); // TODO: libérer liste chainée.
-
-  filler(buf, ".", NULL, 0);
-  filler(buf, "..", NULL, 0);
 
   return 0;
 }
