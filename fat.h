@@ -52,18 +52,30 @@ typedef struct _fat_extended_BIOS_32 {
   uint16_t  boot_sector_sign;    //0x1fe
 } __attribute__ ((packed)) fat_extended_BIOS_32_t;
 
+typedef struct _fat_time {
+  unsigned int seconds2 : 5;
+  unsigned int minutes : 6;
+  unsigned int hours : 5;
+} __attribute__ ((packed)) fat_time_t;
+
+typedef struct _fat_date {
+  unsigned int day : 5;
+  unsigned int month : 4;
+  unsigned int year : 7;
+} __attribute__ ((packed)) fat_date_t;
+
 typedef struct _fat_dir_entry {
   uint8_t   utf8_short_name[8];
   uint8_t   file_extension[3];
   uint8_t   file_attributes;
   uint8_t   reserved;
   uint8_t   create_time_ms;
-  uint16_t  create_time;
-  uint16_t  create_date;
-  uint16_t  last_access_date;
+  fat_time_t  create_time;
+  fat_date_t  create_date;
+  fat_date_t  last_access_date;
   uint16_t  ea_index;
-  uint16_t  last_modif_time;
-  uint16_t  last_modif_date;
+  fat_time_t  last_modif_time;
+  fat_date_t  last_modif_date;
   uint16_t  cluster_pointer;
   uint32_t  file_size;
 

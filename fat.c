@@ -126,22 +126,24 @@ static int is_used_cluster(int cluster) {
   }
 }
 
-static time_t convert_datetime_fat_to_time_t(uint16_t date, uint16_t time) {
-  int day = date & 0x1f;
-  int month = (date & 0x1e0) >> 5;
-  int year = 1980 + ((date & 0xfe00) >> 9);
+static time_t convert_datetime_fat_to_time_t(fat_date_t *date, fat_time_t *time) {
+  int seconds, minutes, hours;
 
-  int seconds = (time & 0x1f) * 2;
-  int minutes = (time & 0x7e0) >> 5;
-  int hours = (time & 0xf800) >> 11;
+  if (time) {
+    seconds = time->seconds2 * 2;
+    minutes = time->minutes;
+    hours = time->hours;
+  } else {
+    seconds = minutes = hours = 0;
+  }
 
   struct tm t = {
     .tm_sec = seconds,
     .tm_min = minutes,
     .tm_hour = hours,
-    .tm_mday = day,
-    .tm_mon = month - 1,
-    .tm_year = year - 1900,
+    .tm_mday = date->day,
+    .tm_mon = date->month - 1,
+    .tm_year = date->year + 80,
   };
 
   return mktime(&t);
@@ -246,11 +248,11 @@ static void fat_dir_entry_to_directory_entry(char *filename, fat_dir_entry_t *di
   entry->attributes = dir->file_attributes;
   entry->size = dir->file_size;
   entry->access_time = 
-      convert_datetime_fat_to_time_t(dir->last_access_date, 0);
+      convert_datetime_fat_to_time_t(&dir->last_access_date, NULL);
   entry->modification_time =
-      convert_datetime_fat_to_time_t(dir->last_modif_date, dir->last_modif_time);
+      convert_datetime_fat_to_time_t(&dir->last_modif_date, &dir->last_modif_time);
   entry->creation_time = 
-      convert_datetime_fat_to_time_t(dir->create_date, dir->create_time);
+      convert_datetime_fat_to_time_t(&dir->create_date, &dir->create_time);
 }
 
 static void read_data(void * buf, size_t count, off_t offset) {
@@ -464,7 +466,8 @@ static directory_entry_t * open_file_from_path(const char *path) {
 }
 
 static int fat_utimens(const char *path, const struct timespec tv[2]) {
-  // TODO.
+  fprintf(debug, "fat_utimens %d %d\n", tv[0].tv_sec, tv[1].tv_sec);
+  fflush(debug);
   return 0;
 }
 
