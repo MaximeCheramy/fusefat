@@ -126,6 +126,63 @@ static int is_used_cluster(int cluster) {
   }
 }
 
+static void convert_time_t_to_datetime_fat(time_t time, fat_time_t *timefat, fat_date_t *datefat) {
+  #define MINUTES 60
+  #define HOURS 3600
+  #define DAYS 86400
+
+  int days_per_month[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+  int days_per_month_leap[] = {31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+
+  int year = 1970;
+  int month = 0;
+  int day = 0;
+  int hours = 0;
+  int min = 0;
+  int sec = 0;
+
+  int secs_year = DAYS * 365;
+  int *dpm = days_per_month;
+
+  while (time) {
+    if (time >= secs_year) {
+      year++;
+      time -= secs_year;
+
+      if (!(year % 400 && (year % 100 == 0 || (year & 3)))) {
+        secs_year = DAYS * 366;
+        dpm = days_per_month_leap;
+      } else {
+        secs_year = DAYS * 365;
+        dpm = days_per_month;
+      }
+    } else {
+      if (time >= dpm[month] * DAYS) {
+        time -= dpm[month] * DAYS;
+        month++;
+      } else {
+        day = time / DAYS;
+        time -= day * DAYS;
+        hours = time / HOURS;
+        time -= hours * HOURS;
+        min = time / MINUTES;
+        time -= min * MINUTES;
+        sec = time;
+        time = 0;
+      }
+    }
+  }
+
+  datefat->year = year - 1980;
+  datefat->month = month + 1;
+  datefat->day = day + 1;
+  if (timefat) {
+    timefat->hours = hours;
+    timefat->minutes = min;
+    timefat->seconds2 = sec / 2;
+  }
+}
+
 static time_t convert_datetime_fat_to_time_t(fat_date_t *date, fat_time_t *time) {
   int seconds, minutes, hours;
 
