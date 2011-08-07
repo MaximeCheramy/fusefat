@@ -661,11 +661,26 @@ static int fat_write (const char *path, const char *buf, size_t size, off_t offs
   return count;
 }
 
+static int fat_chmod(const char * path, mode_t mode) {
+  return 0;
+}
+
+static int fat_chown(const char * path, uid_t uid, gid_t gid) {
+  return 0;
+}
+
+static int fat_truncate(const char * path, off_t off) {
+  return 0;
+}
+
 static struct fuse_operations fat_oper = {
+    .chmod = fat_chmod,
+    .chown = fat_chown,
     .getattr  = fat_getattr,
     .open = fat_open,
     .read = fat_read,
     .readdir  = fat_readdir,
+    .truncate = fat_truncate,
     .utimens = fat_utimens,
     .write = fat_write,
 };
