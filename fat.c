@@ -318,27 +318,37 @@ static void read_data(void * buf, size_t count, off_t offset) {
   close(fd);
 }
 
+static directory_entry_t * decode_lfn_entry(lfn_entry_t* fdir) {
+  int j;
+  char filename[256];
+  uint8_t i_filename = 0;
+  uint8_t seq = fdir->seq_number - 0x40;
+  fprintf(debug, "seq = %d\n", seq);
+  for (j = seq-1; j >= 0; j--) {
+    decode_long_file_name(filename + i_filename, &fdir[j]);
+    i_filename += 13;
+  }
+  fprintf(debug, "filename = %s\n", filename);
+  fflush(debug);
+  directory_entry_t *dir_entry = malloc(sizeof(directory_entry_t));
+  fat_dir_entry_to_directory_entry(filename, (fat_dir_entry_t*)&fdir[seq], dir_entry);
+  return dir_entry;
+}
+
+
 static void read_dir_entries(fat_dir_entry_t *fdir, directory_t *dir, int n) {
   int i;
   for (i = 0; i < n; i++) {
     directory_entry_t * dir_entry;
 
     char filename[256];
-    uint8_t i_filename = 0;
     if (fdir[i].utf8_short_name[0] == 0) {
       break;
     } else if (fdir[i].utf8_short_name[0] != 0xE5) {
       if (fdir[i].file_attributes == 0x0F && ((lfn_entry_t*) &fdir[i])->seq_number & 0x40) {
-        int j;
+        dir_entry = decode_lfn_entry((lfn_entry_t*) &fdir[i]);
         uint8_t seq = ((lfn_entry_t*) &fdir[i])->seq_number - 0x40;
         i += seq;
-        for (j = 1; j <= seq; j++) {
-          decode_long_file_name(filename + i_filename,
-              ((lfn_entry_t*) &fdir[i - j]));
-          i_filename += 13;
-        }
-        dir_entry = malloc(sizeof(directory_entry_t));
-        fat_dir_entry_to_directory_entry(filename, &fdir[i], dir_entry);
         dir_entry->next = dir->entries;
         dir->entries = dir_entry;
         dir->total_entries++;
@@ -525,6 +535,9 @@ static directory_entry_t * open_file_from_path(const char *path) {
 static int fat_utimens(const char *path, const struct timespec tv[2]) {
   fprintf(debug, "fat_utimens %d %d\n", tv[0].tv_sec, tv[1].tv_sec);
   fflush(debug);
+
+  
+
   return 0;
 }
 
