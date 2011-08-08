@@ -335,13 +335,45 @@ static directory_entry_t * decode_lfn_entry(lfn_entry_t* fdir) {
   return dir_entry;
 }
 
+static directory_entry_t * decode_sfn_entry(fat_dir_entry_t *fdir) {
+  int j;
+  char filename[256];
+
+  // Copy basis name.
+  for (j = 0; j < 8; j++) {
+    filename[j] = fdir->utf8_short_name[j];
+  }
+  
+  // Remove trailing whitespaces.
+  j = 7;
+  while (j >= 0 && filename[j] == ' ') {
+    filename[j] = '\0';
+    j--;
+  }
+
+  // Copy extension.
+  filename[8] = '.';
+  for (j = 0; j < 3; j++) {
+    filename[9 + j] = fdir->file_extension[j];
+  }
+
+  // Remove trailing whitespaces in extension.
+  j = 2;
+  while (j >= 0 && filename[9 + j] == ' ') {
+    filename[9 + j] = '\0';
+    j--;
+  }
+
+  directory_entry_t *dir_entry = malloc(sizeof(directory_entry_t));
+  fat_dir_entry_to_directory_entry(filename, fdir, dir_entry);
+  return dir_entry;
+}
 
 static void read_dir_entries(fat_dir_entry_t *fdir, directory_t *dir, int n) {
   int i;
   for (i = 0; i < n; i++) {
     directory_entry_t * dir_entry;
 
-    char filename[256];
     if (fdir[i].utf8_short_name[0] == 0) {
       break;
     } else if (fdir[i].utf8_short_name[0] != 0xE5) {
@@ -353,34 +385,7 @@ static void read_dir_entries(fat_dir_entry_t *fdir, directory_t *dir, int n) {
         dir->entries = dir_entry;
         dir->total_entries++;
       } else {
-        int j;
-        // Copy basis name.
-        for (j = 0; j < 8; j++) {
-          filename[j] = fdir[i].utf8_short_name[j];
-        }
-        
-        // Remove trailing whitespaces.
-        j = 7;
-        while (j >= 0 && filename[j] == ' ') {
-          filename[j] = '\0';
-          j--;
-        }
-
-        // Copy extension.
-        filename[8] = '.';
-        for (j = 0; j < 3; j++) {
-          filename[9 + j] = fdir[i].file_extension[j];
-        }
-
-        // Remove trailing whitespaces in extension.
-        j = 2;
-        while (j >= 0 && filename[9 + j] == ' ') {
-          filename[9 + j] = '\0';
-          j--;
-        }
-
-        dir_entry = malloc(sizeof(directory_entry_t));
-        fat_dir_entry_to_directory_entry(filename, &fdir[i], dir_entry);
+        dir_entry = decode_sfn_entry(&fdir[i]);
         dir_entry->next = dir->entries;
         dir->entries = dir_entry;
         dir->total_entries++;
