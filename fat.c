@@ -371,25 +371,20 @@ static directory_entry_t * decode_sfn_entry(fat_dir_entry_t *fdir) {
 
 static void read_dir_entries(fat_dir_entry_t *fdir, directory_t *dir, int n) {
   int i;
-  for (i = 0; i < n; i++) {
+  for (i = 0; i < n && fdir[i].utf8_short_name[0]; i++) {
     directory_entry_t * dir_entry;
 
-    if (fdir[i].utf8_short_name[0] == 0) {
-      break;
-    } else if (fdir[i].utf8_short_name[0] != 0xE5) {
+    if (fdir[i].utf8_short_name[0] != 0xE5) {
       if (fdir[i].file_attributes == 0x0F && ((lfn_entry_t*) &fdir[i])->seq_number & 0x40) {
         dir_entry = decode_lfn_entry((lfn_entry_t*) &fdir[i]);
         uint8_t seq = ((lfn_entry_t*) &fdir[i])->seq_number - 0x40;
         i += seq;
-        dir_entry->next = dir->entries;
-        dir->entries = dir_entry;
-        dir->total_entries++;
       } else {
         dir_entry = decode_sfn_entry(&fdir[i]);
-        dir_entry->next = dir->entries;
-        dir->entries = dir_entry;
-        dir->total_entries++;
       }
+      dir_entry->next = dir->entries;
+      dir->entries = dir_entry;
+      dir->total_entries++;
     }
   }
 }
