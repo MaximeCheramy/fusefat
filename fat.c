@@ -312,6 +312,12 @@ static void fat_dir_entry_to_directory_entry(char *filename, fat_dir_entry_t *di
       convert_datetime_fat_to_time_t(&dir->create_date, &dir->create_time);
 }
 
+static void write_data(void * buf, size_t count, off_t offset) {
+  int fd = open(options.device, O_WRONLY);
+  pwrite(fd, buf, count, offset);
+  close(fd);
+}
+
 static void read_data(void * buf, size_t count, off_t offset) {
   int fd = open(options.device, O_RDONLY);
   pread(fd, buf, count, offset);
@@ -369,6 +375,58 @@ static directory_entry_t * decode_sfn_entry(fat_dir_entry_t *fdir) {
   return dir_entry;
 }
 
+static int updatedate_dir_entry(int cluster, char * filename, time_t accessdate, time_t modifdate) {
+  directory_entry_t *dir_entry;
+  int n_clusters = 0;
+  int next = cluster;
+  while (!is_last_cluster(next)) {
+    next = fat_info.file_alloc_table[next];
+    n_clusters++;
+  }
+
+  int n_dir_entries = fat_info.BS.bytes_per_sector * fat_info.BS.sectors_per_cluster / sizeof(fat_dir_entry_t);
+  fat_dir_entry_t * fdir = malloc(n_dir_entries * sizeof(fat_dir_entry_t) * n_clusters);
+
+  int c = 0;
+  next = cluster;
+  while (!is_last_cluster(next)) {
+    read_data(fdir + c * n_dir_entries, n_dir_entries * sizeof(fat_dir_entry_t), fat_info.addr_data + (next - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector);
+    next = fat_info.file_alloc_table[next];
+    c++;
+  }
+
+  int i;
+  for (i = 0; i < n_dir_entries * n_clusters && fdir[i].utf8_short_name[0]; i++) {
+    if (fdir[i].utf8_short_name[0] != 0xE5) {
+      if (fdir[i].file_attributes == 0x0F && ((lfn_entry_t*) &fdir[i])->seq_number & 0x40) {
+        dir_entry = decode_lfn_entry((lfn_entry_t*) &fdir[i]);
+        uint8_t seq = ((lfn_entry_t*) &fdir[i])->seq_number - 0x40;
+        i += seq;
+      } else {
+        dir_entry = decode_sfn_entry(&fdir[i]);
+      }
+     
+      fprintf(debug, "updatedate : %s\n", dir_entry->name);
+      fflush(debug);
+
+      if (strcmp(filename, dir_entry->name) == 0) {
+        next = cluster;
+        while (i >= n_dir_entries) {
+          i -= n_dir_entries;
+          next = fat_info.file_alloc_table[next];
+        }
+        convert_time_t_to_datetime_fat(accessdate, NULL, &(fdir[i].last_access_date));
+        convert_time_t_to_datetime_fat(modifdate, &(fdir[i].last_modif_time), &(fdir[i].last_modif_date));
+        write_data(&fdir[i], sizeof(fat_dir_entry_t), fat_info.addr_data + (next - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector + i * sizeof(fat_dir_entry_t));
+
+        return 0;
+      }
+      free(dir_entry);
+    }
+  }
+  return 1;
+}
+
 static void read_dir_entries(fat_dir_entry_t *fdir, directory_t *dir, int n) {
   int i;
   for (i = 0; i < n && fdir[i].utf8_short_name[0]; i++) {
@@ -392,8 +450,8 @@ static void read_dir_entries(fat_dir_entry_t *fdir, directory_t *dir, int n) {
 static void open_dir(int cluster, directory_t *dir) {
   int n_clusters = 0;
   int next = cluster;
-  while (!is_last_cluster(cluster)) {
-    cluster = fat_info.file_alloc_table[cluster];
+  while (!is_last_cluster(next)) {
+    next = fat_info.file_alloc_table[next];
     n_clusters++;
   }
 
@@ -401,12 +459,14 @@ static void open_dir(int cluster, directory_t *dir) {
   fat_dir_entry_t * sub_dir = malloc(n_dir_entries * sizeof(fat_dir_entry_t) * n_clusters);
 
   int c = 0;
+  next = cluster;
   while (!is_last_cluster(next)) {
     read_data(sub_dir + c * n_dir_entries, n_dir_entries * sizeof(fat_dir_entry_t), fat_info.addr_data + (next - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector);
     next = fat_info.file_alloc_table[next];
     c++;
   }
 
+  dir->cluster = cluster;
   dir->total_entries = 0;
   dir->entries = NULL;
 
@@ -423,6 +483,7 @@ static directory_t * open_root_dir() {
   
     read_data(root_dir, sizeof(fat_dir_entry_t) * fat_info.BS.root_entry_count, fat_info.addr_root_dir);
   
+    dir->cluster = -1;
     dir->total_entries = 0;
     dir->entries = NULL;
   
@@ -535,10 +596,19 @@ static directory_entry_t * open_file_from_path(const char *path) {
 static int fat_utimens(const char *path, const struct timespec tv[2]) {
   fprintf(debug, "fat_utimens %d %d\n", tv[0].tv_sec, tv[1].tv_sec);
   fflush(debug);
-
   
+  char * dir = malloc(strlen(path));
+  char filename[256];
+  split_dir_filename(path, dir, filename);
 
-  return 0;
+  directory_t * directory = open_dir_from_path(dir);
+  free(dir);
+  
+  int ret = updatedate_dir_entry(directory->cluster, filename, tv[0].tv_sec, tv[1].tv_sec);
+
+  free(directory);
+
+  return ret;
 }
 
 static int fat_getattr(const char *path, struct stat *stbuf)
