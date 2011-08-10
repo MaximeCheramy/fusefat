@@ -26,9 +26,7 @@ static fat_info_t fat_info;
 
 static char * lfn_to_sfn(char * filename) {
   char * lfn = strdup(filename);
-  char * sfn = malloc(13);
-
-  char * ext = strrchr(lfn, '.');
+  char * sfn = malloc(12);
 
   // To upper case.
   int i = 0;
@@ -51,28 +49,47 @@ static char * lfn_to_sfn(char * filename) {
   }
   lfn[j] = '\0';
 
+  char * ext = strrchr(lfn, '.');
   int has_ext = (ext != NULL) && (lfn + j - ext - 1 <= 3);
 
-  // Copy first 8 caracters.
-  i = 0;
-  j = 0;
-  while (&lfn[i] <= ext) {
-    if (lfn[i] != '.' && j < 8) {
-      sfn[j] = lfn[i];
-      j++;
-    }
-    i++;
-  }
-
-  // Copy extension.
   if (has_ext) {
+    // Copy first 8 caracters.
+    i = 0;
+    j = 0;
+    while (&lfn[i] <= ext) {
+      if (lfn[i] != '.' && j < 8) {
+        sfn[j] = lfn[i];
+        j++;
+      }
+      i++;
+    }
+  
+    // padding
+    while (j < 8)
+      sfn[j++] = ' ';
+
+    // Copy extension.
     sfn[j++] = '.';
     while (lfn[i] != '\0') {
       sfn[j++] = lfn[i];
       i++;
     }
+
+    while (j < 12)
+      sfn[j++] = ' ';
+  } else {
+    i = 0;
+    j = 0;
+    while (lfn[i] != '\0' && j < 8) {
+      if (lfn[i] != '.') {
+        sfn[j] = lfn[i];
+        j++;
+      }
+      i++;
+    }
+    while (j < 12)
+      sfn[j++] = ' ';
   }
-  sfn[j] = '\0';
 
   // TODO: numeric-tail generation.
 
@@ -100,6 +117,16 @@ static char * decode_long_file_name(char * name, lfn_entry_t * long_file_name) {
   name[13] = '\0';
 
   return name;
+}
+
+static int last_cluster() {
+  if (fat_info.fat_type == FAT12) {
+    return 0xFFF;
+  } else if (fat_info.fat_type == FAT16) {
+    return 0xFFFF;
+  } else {
+    return 0x0FFFFFFF;
+  }
 }
 
 static int is_free_cluster(int cluster) {
@@ -375,6 +402,22 @@ static directory_entry_t * decode_sfn_entry(fat_dir_entry_t *fdir) {
   return dir_entry;
 }
 
+static int alloc_cluster(int n) {
+  if (n <= 0) {
+    return last_cluster();
+  }
+  int next = alloc_cluster(n - 1);
+  int i;
+  for (i = 0; i < fat_info.total_data_clusters; i++) {
+    if (fat_info.file_alloc_table[i] == 0) {
+      fat_info.file_alloc_table[i] = next;
+      return i;
+    }
+  }
+  return -1;
+}
+
+
 static int updatedate_dir_entry(int cluster, char * filename, time_t accessdate, time_t modifdate) {
   directory_entry_t *dir_entry;
   int n_clusters = 0;
@@ -405,9 +448,6 @@ static int updatedate_dir_entry(int cluster, char * filename, time_t accessdate,
       } else {
         dir_entry = decode_sfn_entry(&fdir[i]);
       }
-     
-      fprintf(debug, "updatedate : %s\n", dir_entry->name);
-      fflush(debug);
 
       if (strcmp(filename, dir_entry->name) == 0) {
         next = cluster;
@@ -593,10 +633,54 @@ static directory_entry_t * open_file_from_path(const char *path) {
   return NULL;
 }
 
+static int add_fat_dir_entry(char * path, fat_dir_entry_t *fentry, int n) {
+  directory_t *dir = open_dir_from_path(path);
+  int next = dir->cluster;
+  int n_clusters = 0;
+  while (!is_last_cluster(next)) {
+    next = fat_info.file_alloc_table[next];
+    n_clusters++;
+  }
+
+  int n_dir_entries = fat_info.BS.bytes_per_sector * fat_info.BS.sectors_per_cluster / sizeof(fat_dir_entry_t);
+  fat_dir_entry_t * dir_entries = malloc(n_dir_entries * sizeof(fat_dir_entry_t) * n_clusters);
+
+  int c = 0;
+  next = dir->cluster;
+  while (!is_last_cluster(next)) {
+    read_data(dir_entries + c * n_dir_entries, n_dir_entries * sizeof(fat_dir_entry_t), fat_info.addr_data + (next - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector);
+    next = fat_info.file_alloc_table[next];
+    c++;
+  }
+
+  int i;
+  int consecutif = 0;
+  for (i = 0; i < n_dir_entries * n_clusters; i++) {
+    if (dir_entries[i].utf8_short_name[0] == 0 || dir_entries[i].utf8_short_name[0] == 0xe5) {
+      consecutif++;
+      if (consecutif == n) {
+        next = dir->cluster;
+        int j;
+        for (j = 0; j < (i - n + 1) / n_dir_entries; j++)
+          next = fat_info.file_alloc_table[next];
+        for (j = 0; j < n; j++) {
+          int off = (i - n + j + 1) % n_dir_entries; // offset dans le cluster.
+          write_data(&fentry[j], sizeof(fat_dir_entry_t), fat_info.addr_data + (next - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector + off * sizeof(fat_dir_entry_t));
+          if (off == n_dir_entries - 1) {
+            next = fat_info.file_alloc_table[next];
+          }
+        }
+      }
+    } else {
+      consecutif = 0;
+    }
+  }
+  if (consecutif < n) {
+    // TODO: creation nouveau cluster.
+  }
+}
+
 static int fat_utimens(const char *path, const struct timespec tv[2]) {
-  fprintf(debug, "fat_utimens %d %d\n", tv[0].tv_sec, tv[1].tv_sec);
-  fflush(debug);
-  
   char * dir = malloc(strlen(path));
   char filename[256];
   split_dir_filename(path, dir, filename);
@@ -609,6 +693,39 @@ static int fat_utimens(const char *path, const struct timespec tv[2]) {
   free(directory);
 
   return ret;
+}
+
+static int fat_mkdir (const char * path, mode_t mode) {
+  fprintf(debug, "fat_mkdir %s %d\n", path, mode);
+  fflush(debug);
+
+  char * dir = malloc(strlen(path));
+  char filename[256];
+  split_dir_filename(path, dir, filename);
+
+  char * sfn = lfn_to_sfn(filename);
+
+  fat_dir_entry_t *fentry = malloc(sizeof(fat_dir_entry_t));
+  
+  // TODO: gérer lfn
+
+  strncpy(fentry->utf8_short_name, sfn, 8);
+  strncpy(fentry->file_extension, sfn + 8, 3);
+  fentry->file_attributes = 0x10; //TODO: Utiliser variable mode et des defines.
+  fentry->reserved = 0;
+  fentry->create_time_ms = 0;
+  time_t t = time(NULL);
+  convert_time_t_to_datetime_fat(t, &(fentry->create_time), &(fentry->create_date));
+  convert_time_t_to_datetime_fat(t, NULL, &(fentry->last_access_date));
+  fentry->ea_index = 0; //XXX
+  convert_time_t_to_datetime_fat(t, &(fentry->last_modif_time), &(fentry->last_modif_date));
+  fentry->file_size = 0;
+  fentry->cluster_pointer = alloc_cluster(1);
+
+  add_fat_dir_entry(dir, fentry, 1);
+
+
+  return 0;
 }
 
 static int fat_getattr(const char *path, struct stat *stbuf)
@@ -820,6 +937,7 @@ static struct fuse_operations fat_oper = {
     .chmod = fat_chmod,
     .chown = fat_chown,
     .getattr  = fat_getattr,
+    .mkdir = fat_mkdir,
     .open = fat_open,
     .read = fat_read,
     .readdir  = fat_readdir,
