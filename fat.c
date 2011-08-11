@@ -119,6 +119,38 @@ static char * decode_long_file_name(char * name, lfn_entry_t * long_file_name) {
   return name;
 }
 
+static void encode_long_file_name(char * name, lfn_entry_t * long_file_name, int n_entries) {
+ // TODO: padding ? Checksum.
+  long_file_name[0].seq_number = 0x40 + n_entries;
+  int i, j;
+  for (i = n_entries - 1; i >= 0; i--) {
+    long_file_name[i].attributes = 0x0f;
+    if (i != n_entries - 1)
+      long_file_name[i].seq_number = i + 1;
+    for (j = 0; j < 5; j++) {
+      if (name[j] != '\0')
+        long_file_name[i].filename1[j * 2] = name[j];
+      else
+        return;
+    }
+    for (j = 5; j < 11; j++) {
+      if (name[j] != '\0')
+       long_file_name[i].filename2[(j - 5) * 2] = name[j];
+      else
+        return;
+    }
+    if (name[11] != '\0')
+      long_file_name[i].filename3[0] = name[11];
+    else
+      return;
+
+    if (name[12] != '\0')
+      long_file_name[i].filename3[2] = name[12];
+    else
+      return;
+  }
+}
+
 static int last_cluster() {
   if (fat_info.fat_type == FAT12) {
     return 0xFFF;
@@ -704,10 +736,12 @@ static int fat_mkdir (const char * path, mode_t mode) {
   split_dir_filename(path, dir, filename);
 
   char * sfn = lfn_to_sfn(filename);
-
-  fat_dir_entry_t *fentry = malloc(sizeof(fat_dir_entry_t));
   
-  // TODO: gérer lfn
+  int n_entries = 1 + ((strlen(filename) - 1) / 13);
+  lfn_entry_t * long_file_name = malloc(sizeof(lfn_entry_t) * (n_entries + 1));
+  fat_dir_entry_t *fentry = (fat_dir_entry_t*) &long_file_name[n_entries];
+
+  encode_long_file_name(filename, long_file_name, n_entries);
 
   strncpy(fentry->utf8_short_name, sfn, 8);
   strncpy(fentry->file_extension, sfn + 8, 3);
@@ -722,7 +756,7 @@ static int fat_mkdir (const char * path, mode_t mode) {
   fentry->file_size = 0;
   fentry->cluster_pointer = alloc_cluster(1);
 
-  add_fat_dir_entry(dir, fentry, 1);
+  add_fat_dir_entry(dir, (fat_dir_entry_t*)long_file_name, n_entries + 1);
 
 
   return 0;
