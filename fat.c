@@ -298,6 +298,41 @@ static void read_fat() {
   }
 }
 
+static void write_fat() {
+  uint8_t buffer[fat_info.BS.bytes_per_sector * fat_info.table_size];
+  
+  uint32_t i;
+  int p = 0;
+  uint32_t tmp = 0;
+
+  if (fat_info.fat_type == FAT12) {
+    for (i = 0; i < fat_info.total_data_clusters; i += 2) {
+      tmp = (fat_info.file_alloc_table[i + 1] << 12) + (fat_info.file_alloc_table[i] & 0xFFF);
+      buffer[p++] = tmp & 0x0000FF;
+      buffer[p++] = tmp & 0x00FF00;
+      buffer[p++] = tmp & 0xFF0000;
+    }
+  } else if (fat_info.fat_type == FAT16) {
+    for (i = 0; i < fat_info.total_data_clusters; i++) {
+      buffer[i*4] = fat_info.file_alloc_table[i] & 0x00FF;
+      buffer[i*4 + 1] = fat_info.file_alloc_table[i] & 0xFF00;
+    }
+  } else if (fat_info.fat_type == FAT32) {
+    for (i = 0; i < fat_info.total_data_clusters; i++) {
+      buffer[i*4]     = fat_info.file_alloc_table[i] & 0x000000FF;
+      buffer[i*4 + 1] = fat_info.file_alloc_table[i] & 0x0000FF00;
+      buffer[i*4 + 2] = fat_info.file_alloc_table[i] & 0x00FF0000;
+      buffer[i*4 + 3] = fat_info.file_alloc_table[i] & 0xFF000000;
+    }
+  }
+ 
+  int fd = open(options.device, O_RDONLY);
+  for (i = 0; i < fat_info.BS.table_count; i++) {
+    pwrite(fd, buffer, sizeof(buffer), fat_info.addr_fat[i]);
+  }
+  close(fd);
+}
+
 static void mount_fat() {
   fprintf(stderr, "Mount FAT.\n");
   int fd = open(options.device, O_RDONLY);
@@ -758,6 +793,7 @@ static int fat_mkdir (const char * path, mode_t mode) {
 
   add_fat_dir_entry(dir, (fat_dir_entry_t*)long_file_name, n_entries + 1);
 
+  write_fat();
 
   return 0;
 }
