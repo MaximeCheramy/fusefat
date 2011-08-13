@@ -727,6 +727,13 @@ static directory_entry_t * open_file_from_path(const char *path) {
   return NULL;
 }
 
+static void init_dir_cluster(int cluster) {
+  int n_dir_entries = fat_info.BS.bytes_per_sector * fat_info.BS.sectors_per_cluster / sizeof(fat_dir_entry_t);
+  fat_dir_entry_t * dir_entries = calloc(n_dir_entries, sizeof(fat_dir_entry_t));
+ 
+  write_data(dir_entries, sizeof(fat_dir_entry_t) * n_dir_entries, fat_info.addr_data + (cluster - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector);
+}
+
 static int add_fat_dir_entry(char * path, fat_dir_entry_t *fentry, int n) {
   directory_t *dir = open_dir_from_path(path);
   int next = dir->cluster;
@@ -771,7 +778,8 @@ static int add_fat_dir_entry(char * path, fat_dir_entry_t *fentry, int n) {
   }
   if (consecutif < n) {
     int j;
-    int newcluster = alloc_cluster(1); // TODO: vider cluster avant de l'utiliser.
+    int newcluster = alloc_cluster(1);
+    init_dir_cluster(newcluster);
     next = dir->cluster;
     while (!is_last_cluster(fat_info.file_alloc_table[next])) {
       next = fat_info.file_alloc_table[next];
@@ -834,7 +842,8 @@ static int fat_mkdir (const char * path, mode_t mode) {
   fentry->ea_index = 0; //XXX
   convert_time_t_to_datetime_fat(t, &(fentry->last_modif_time), &(fentry->last_modif_date));
   fentry->file_size = 0;
-  fentry->cluster_pointer = alloc_cluster(1); // TODO: vider cluster avant de l'utiliser.
+  fentry->cluster_pointer = alloc_cluster(1);
+  init_dir_cluster(fentry->cluster_pointer);
 
   add_fat_dir_entry(dir, (fat_dir_entry_t*)long_file_name, n_entries + 1);
 
