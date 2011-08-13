@@ -737,66 +737,82 @@ static void init_dir_cluster(int cluster) {
 static int add_fat_dir_entry(char * path, fat_dir_entry_t *fentry, int n) {
   directory_t *dir = open_dir_from_path(path);
   int next = dir->cluster;
-  int n_clusters = 0;
-  while (!is_last_cluster(next)) {
-    next = fat_info.file_alloc_table[next];
-    n_clusters++;
-  }
-
-  int n_dir_entries = fat_info.BS.bytes_per_sector * fat_info.BS.sectors_per_cluster / sizeof(fat_dir_entry_t);
-  fat_dir_entry_t * dir_entries = malloc(n_dir_entries * sizeof(fat_dir_entry_t) * n_clusters);
-
-  int c = 0;
-  next = dir->cluster;
-  while (!is_last_cluster(next)) {
-    read_data(dir_entries + c * n_dir_entries, n_dir_entries * sizeof(fat_dir_entry_t), fat_info.addr_data + (next - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector);
-    next = fat_info.file_alloc_table[next];
-    c++;
-  }
-
-  int i;
-  int consecutif = 0;
-  for (i = 0; i < n_dir_entries * n_clusters; i++) {
-    if (dir_entries[i].utf8_short_name[0] == 0 || dir_entries[i].utf8_short_name[0] == 0xe5) {
-      consecutif++;
-      if (consecutif == n) {
-        next = dir->cluster;
-        int j;
-        for (j = 0; j < (i - n + 1) / n_dir_entries; j++)
-          next = fat_info.file_alloc_table[next];
-        for (j = 0; j < n; j++) {
-          int off = (i - n + j + 1) % n_dir_entries; // offset dans le cluster.
-          write_data(&fentry[j], sizeof(fat_dir_entry_t), fat_info.addr_data + (next - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector + off * sizeof(fat_dir_entry_t));
-          if (off == n_dir_entries - 1) {
+  if (next > 0) {
+    int n_clusters = 0;
+    while (!is_last_cluster(next)) {
+      next = fat_info.file_alloc_table[next];
+      n_clusters++;
+    }
+  
+    int n_dir_entries = fat_info.BS.bytes_per_sector * fat_info.BS.sectors_per_cluster / sizeof(fat_dir_entry_t);
+    fat_dir_entry_t * dir_entries = malloc(n_dir_entries * sizeof(fat_dir_entry_t) * n_clusters);
+  
+    int c = 0;
+    next = dir->cluster;
+    while (!is_last_cluster(next)) {
+      read_data(dir_entries + c * n_dir_entries, n_dir_entries * sizeof(fat_dir_entry_t), fat_info.addr_data + (next - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector);
+      next = fat_info.file_alloc_table[next];
+      c++;
+    }
+  
+    int i;
+    int consecutif = 0;
+    for (i = 0; i < n_dir_entries * n_clusters; i++) {
+      if (dir_entries[i].utf8_short_name[0] == 0 || dir_entries[i].utf8_short_name[0] == 0xe5) {
+        consecutif++;
+        if (consecutif == n) {
+          next = dir->cluster;
+          int j;
+          for (j = 0; j < (i - n + 1) / n_dir_entries; j++)
             next = fat_info.file_alloc_table[next];
+          for (j = 0; j < n; j++) {
+            int off = (i - n + j + 1) % n_dir_entries; // offset dans le cluster.
+            write_data(&fentry[j], sizeof(fat_dir_entry_t), fat_info.addr_data + (next - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector + off * sizeof(fat_dir_entry_t));
+            if (off == n_dir_entries - 1) {
+              next = fat_info.file_alloc_table[next];
+            }
           }
         }
+      } else {
+        consecutif = 0;
       }
-    } else {
-      consecutif = 0;
     }
-  }
-  if (consecutif < n) {
-    int j;
-    int newcluster = alloc_cluster(1);
-    init_dir_cluster(newcluster);
-    next = dir->cluster;
-    while (!is_last_cluster(fat_info.file_alloc_table[next])) {
-      next = fat_info.file_alloc_table[next];
+    if (consecutif < n) {
+      int j;
+      int newcluster = alloc_cluster(1);
+      init_dir_cluster(newcluster);
+      next = dir->cluster;
+      while (!is_last_cluster(fat_info.file_alloc_table[next])) {
+        next = fat_info.file_alloc_table[next];
+      }
+      fat_info.file_alloc_table[next] = newcluster;
+      fprintf(debug, "new cluster : %d %x\n", newcluster, fat_info.addr_data + (newcluster - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector);
+      fflush(debug);
+  
+      for (j = 0; j < consecutif; j++) {
+        int off = n_dir_entries - consecutif + j;
+        write_data(&fentry[j], sizeof(fat_dir_entry_t), fat_info.addr_data + (next - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector + off * sizeof(fat_dir_entry_t));
+      }
+      for (j = consecutif; j < n; j++) {
+        int off = n_dir_entries - consecutif + j;
+        write_data(&fentry[j], sizeof(fat_dir_entry_t), fat_info.addr_data + (newcluster - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector + off * sizeof(fat_dir_entry_t));
+      }
+      write_fat();
     }
-    fat_info.file_alloc_table[next] = newcluster;
-    fprintf(debug, "new cluster : %d %x\n", newcluster, fat_info.addr_data + (newcluster - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector);
-    fflush(debug);
+  } else if (fat_info.fat_type != FAT32) {
+    int i;
+    int consecutif = 0;
+    fat_dir_entry_t *root_dir = malloc(sizeof(fat_dir_entry_t) * fat_info.BS.root_entry_count);
+    read_data(root_dir, sizeof(fat_dir_entry_t) * fat_info.BS.root_entry_count, fat_info.addr_root_dir);
 
-    for (j = 0; j < consecutif; j++) {
-      int off = n_dir_entries - consecutif + j;
-      write_data(&fentry[j], sizeof(fat_dir_entry_t), fat_info.addr_data + (next - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector + off * sizeof(fat_dir_entry_t));
+    for (i = 0; i < fat_info.BS.root_entry_count; i++) {
+      if (root_dir[i].utf8_short_name[0] == 0 || root_dir[i].utf8_short_name[0] == 0xe5) {
+        consecutif++;
+        if (consecutif == n) {
+          write_data(fentry, sizeof(fat_dir_entry_t) * n, fat_info.addr_root_dir + i * sizeof(fat_dir_entry_t));
+        }
+      }
     }
-    for (j = consecutif; j < n; j++) {
-      int off = n_dir_entries - consecutif + j;
-      write_data(&fentry[j], sizeof(fat_dir_entry_t), fat_info.addr_data + (newcluster - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector + off * sizeof(fat_dir_entry_t));
-    }
-    write_fat();
   }
 }
 
