@@ -515,49 +515,79 @@ static int alloc_cluster(int n) {
 static int updatedate_dir_entry(int cluster, char * filename, time_t accessdate, time_t modifdate) {
   directory_entry_t *dir_entry;
   int n_clusters = 0;
-  int next = cluster;
-  while (!is_last_cluster(next)) {
-    next = fat_info.file_alloc_table[next];
-    n_clusters++;
-  }
 
-  int n_dir_entries = fat_info.BS.bytes_per_sector * fat_info.BS.sectors_per_cluster / sizeof(fat_dir_entry_t);
-  fat_dir_entry_t * fdir = malloc(n_dir_entries * sizeof(fat_dir_entry_t) * n_clusters);
-
-  int c = 0;
-  next = cluster;
-  while (!is_last_cluster(next)) {
-    read_data(fdir + c * n_dir_entries, n_dir_entries * sizeof(fat_dir_entry_t), fat_info.addr_data + (next - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector);
-    next = fat_info.file_alloc_table[next];
-    c++;
-  }
-
-  int i;
-  for (i = 0; i < n_dir_entries * n_clusters && fdir[i].utf8_short_name[0]; i++) {
-    if (fdir[i].utf8_short_name[0] != 0xE5) {
-      if (fdir[i].file_attributes == 0x0F && ((lfn_entry_t*) &fdir[i])->seq_number & 0x40) {
-        dir_entry = decode_lfn_entry((lfn_entry_t*) &fdir[i]);
-        uint8_t seq = ((lfn_entry_t*) &fdir[i])->seq_number - 0x40;
-        i += seq;
-      } else {
-        dir_entry = decode_sfn_entry(&fdir[i]);
-      }
-
-      if (strcmp(filename, dir_entry->name) == 0) {
-        next = cluster;
-        while (i >= n_dir_entries) {
-          i -= n_dir_entries;
-          next = fat_info.file_alloc_table[next];
+  if (cluster > 0) {
+    int next = cluster;
+    while (!is_last_cluster(next)) {
+      next = fat_info.file_alloc_table[next];
+      n_clusters++;
+    }
+  
+    int n_dir_entries = fat_info.BS.bytes_per_sector * fat_info.BS.sectors_per_cluster / sizeof(fat_dir_entry_t);
+    fat_dir_entry_t * fdir = malloc(n_dir_entries * sizeof(fat_dir_entry_t) * n_clusters);
+  
+    int c = 0;
+    next = cluster;
+    while (!is_last_cluster(next)) {
+      read_data(fdir + c * n_dir_entries, n_dir_entries * sizeof(fat_dir_entry_t), fat_info.addr_data + (next - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector);
+      next = fat_info.file_alloc_table[next];
+      c++;
+    }
+  
+    int i;
+    for (i = 0; i < n_dir_entries * n_clusters && fdir[i].utf8_short_name[0]; i++) {
+      if (fdir[i].utf8_short_name[0] != 0xE5) {
+        if (fdir[i].file_attributes == 0x0F && ((lfn_entry_t*) &fdir[i])->seq_number & 0x40) {
+          dir_entry = decode_lfn_entry((lfn_entry_t*) &fdir[i]);
+          uint8_t seq = ((lfn_entry_t*) &fdir[i])->seq_number - 0x40;
+          i += seq;
+        } else {
+          dir_entry = decode_sfn_entry(&fdir[i]);
         }
-        convert_time_t_to_datetime_fat(accessdate, NULL, &(fdir[i].last_access_date));
-        convert_time_t_to_datetime_fat(modifdate, &(fdir[i].last_modif_time), &(fdir[i].last_modif_date));
-        write_data(&fdir[i], sizeof(fat_dir_entry_t), fat_info.addr_data + (next - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector + i * sizeof(fat_dir_entry_t));
-
-        return 0;
+  
+        if (strcmp(filename, dir_entry->name) == 0) {
+          next = cluster;
+          while (i >= n_dir_entries) {
+            i -= n_dir_entries;
+            next = fat_info.file_alloc_table[next];
+          }
+          convert_time_t_to_datetime_fat(accessdate, NULL, &(fdir[i].last_access_date));
+          convert_time_t_to_datetime_fat(modifdate, &(fdir[i].last_modif_time), &(fdir[i].last_modif_date));
+          write_data(&fdir[i], sizeof(fat_dir_entry_t), fat_info.addr_data + (next - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector + i * sizeof(fat_dir_entry_t));
+  
+          return 0;
+        }
+        free(dir_entry);
       }
-      free(dir_entry);
+    }
+  } else {
+    fat_dir_entry_t *fdir = malloc(sizeof(fat_dir_entry_t) * fat_info.BS.root_entry_count);
+    read_data(fdir, sizeof(fat_dir_entry_t) * fat_info.BS.root_entry_count, fat_info.addr_root_dir);
+ 
+    int i;
+    for (i = 0; i < fat_info.BS.root_entry_count && fdir[i].utf8_short_name[0]; i++) {
+      if (fdir[i].utf8_short_name[0] != 0xE5) {
+        if (fdir[i].file_attributes == 0x0F && ((lfn_entry_t*) &fdir[i])->seq_number & 0x40) {
+          dir_entry = decode_lfn_entry((lfn_entry_t*) &fdir[i]);
+          uint8_t seq = ((lfn_entry_t*) &fdir[i])->seq_number - 0x40;
+          i += seq;
+        } else {
+          dir_entry = decode_sfn_entry(&fdir[i]);
+        }
+  
+        if (strcmp(filename, dir_entry->name) == 0) {
+          convert_time_t_to_datetime_fat(accessdate, NULL, &(fdir[i].last_access_date));
+          convert_time_t_to_datetime_fat(modifdate, &(fdir[i].last_modif_time), &(fdir[i].last_modif_date));
+          write_data(&fdir[i], sizeof(fat_dir_entry_t), fat_info.addr_root_dir + i * sizeof(fat_dir_entry_t));
+  
+          return 0;
+        }
+        free(dir_entry);
+      }
     }
   }
+
+
   return 1;
 }
 
