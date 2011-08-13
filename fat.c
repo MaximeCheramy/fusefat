@@ -664,7 +664,6 @@ static int open_next_dir(directory_t * prev_dir, directory_t * next_dir, char * 
   fflush(debug);
 
   int next = 0;
-  int i;
 
   directory_entry_t *dentry = prev_dir->entries;
   while (dentry) {
@@ -802,6 +801,7 @@ static int add_fat_dir_entry(char * path, fat_dir_entry_t *fentry, int n) {
               next = fat_info.file_alloc_table[next];
             }
           }
+          return 0;
         }
       } else {
         consecutif = 0;
@@ -828,6 +828,7 @@ static int add_fat_dir_entry(char * path, fat_dir_entry_t *fentry, int n) {
         write_data(&fentry[j], sizeof(fat_dir_entry_t), fat_info.addr_data + (newcluster - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector + off * sizeof(fat_dir_entry_t));
       }
       write_fat();
+      return 0;
     }
   } else if (fat_info.fat_type != FAT32) {
     int i;
@@ -840,10 +841,12 @@ static int add_fat_dir_entry(char * path, fat_dir_entry_t *fentry, int n) {
         consecutif++;
         if (consecutif == n) {
           write_data(fentry, sizeof(fat_dir_entry_t) * n, fat_info.addr_root_dir + i * sizeof(fat_dir_entry_t));
+          return 0;
         }
       }
     }
   }
+  return 1;
 }
 
 static int fat_utimens(const char *path, const struct timespec tv[2]) {

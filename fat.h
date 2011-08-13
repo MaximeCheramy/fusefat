@@ -65,8 +65,8 @@ typedef struct _fat_date {
 } __attribute__ ((packed)) fat_date_t;
 
 typedef struct _fat_dir_entry {
-  uint8_t   utf8_short_name[8];
-  uint8_t   file_extension[3];
+  char      utf8_short_name[8];
+  char      file_extension[3];
   uint8_t   file_attributes;
   uint8_t   reserved;
   uint8_t   create_time_ms;
