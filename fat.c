@@ -120,34 +120,64 @@ static char * decode_long_file_name(char * name, lfn_entry_t * long_file_name) {
 }
 
 static void encode_long_file_name(char * name, lfn_entry_t * long_file_name, int n_entries) {
- // TODO: padding ? Checksum.
+ // TODO: Checksum.
   long_file_name[0].seq_number = 0x40 + n_entries;
   int i, j;
+  int last = 0;
   for (i = n_entries - 1; i >= 0; i--) {
     long_file_name[i].attributes = 0x0f;
     if (i != n_entries - 1)
       long_file_name[i].seq_number = i + 1;
     for (j = 0; j < 5; j++) {
-      if (name[j] != '\0')
-        long_file_name[i].filename1[j * 2] = name[j];
-      else
-        return;
+      if (last) {
+        long_file_name[i].filename1[j * 2] = 0xFF;
+        long_file_name[i].filename1[j * 2 + 1] = 0xFF;
+      } else if (name[j] != '\0') {
+        long_file_name[i].filename1[j * 2] = name[i * 13 + j];
+        long_file_name[i].filename1[j * 2 + 1] = 0;
+      } else {
+        long_file_name[i].filename1[j * 2] = 0;
+        long_file_name[i].filename1[j * 2 + 1] = 0;
+        last = 1;
+      } 
     }
     for (j = 5; j < 11; j++) {
-      if (name[j] != '\0')
-       long_file_name[i].filename2[(j - 5) * 2] = name[j];
-      else
-        return;
+      if (last) {
+        long_file_name[i].filename2[(j - 5) * 2] = 0xFF;
+        long_file_name[i].filename2[(j - 5) * 2 + 1] = 0xFF;
+      } else if (name[j] != '\0') {
+        long_file_name[i].filename2[(j - 5) * 2] = name[i * 13 + j];
+        long_file_name[i].filename2[(j - 5) * 2 + 1] = 0;
+      } else {
+        long_file_name[i].filename2[(j - 5) * 2] = 0;
+        long_file_name[i].filename2[(j - 5) * 2 + 1] = 0;
+        last = 1;
+      }
     }
-    if (name[11] != '\0')
-      long_file_name[i].filename3[0] = name[11];
-    else
-      return;
 
-    if (name[12] != '\0')
-      long_file_name[i].filename3[2] = name[12];
-    else
-      return;
+    if (last) {
+      long_file_name[i].filename3[0] = 0xFF;
+      long_file_name[i].filename3[1] = 0xFF;
+    } else if (name[11] != '\0') {
+      long_file_name[i].filename3[0] = name[i * 13 + 11];
+      long_file_name[i].filename3[1] = 0;
+    } else {
+      long_file_name[i].filename3[0] = 0;
+      long_file_name[i].filename3[1] = 0;
+      last = 1;
+    }
+
+    if (last) {
+      long_file_name[i].filename3[0] = 0xFF;
+      long_file_name[i].filename3[1] = 0xFF;
+    } else if (name[12] != '\0') {
+      long_file_name[i].filename3[0] = name[i * 13 + 12];
+      long_file_name[i].filename3[1] = 0;
+    } else {
+      long_file_name[i].filename3[0] = 0;
+      long_file_name[i].filename3[1] = 0;
+      last = 1;
+    }
   }
 }
 
@@ -423,13 +453,10 @@ static directory_entry_t * decode_lfn_entry(lfn_entry_t* fdir) {
   char filename[256];
   uint8_t i_filename = 0;
   uint8_t seq = fdir->seq_number - 0x40;
-  fprintf(debug, "seq = %d\n", seq);
   for (j = seq-1; j >= 0; j--) {
     decode_long_file_name(filename + i_filename, &fdir[j]);
     i_filename += 13;
   }
-  fprintf(debug, "filename = %s\n", filename);
-  fflush(debug);
   directory_entry_t *dir_entry = malloc(sizeof(directory_entry_t));
   fat_dir_entry_to_directory_entry(filename, (fat_dir_entry_t*)&fdir[seq], dir_entry);
   return dir_entry;
@@ -743,7 +770,25 @@ static int add_fat_dir_entry(char * path, fat_dir_entry_t *fentry, int n) {
     }
   }
   if (consecutif < n) {
-    // TODO: creation nouveau cluster.
+    int j;
+    int newcluster = alloc_cluster(1); // TODO: vider cluster avant de l'utiliser.
+    next = dir->cluster;
+    while (!is_last_cluster(fat_info.file_alloc_table[next])) {
+      next = fat_info.file_alloc_table[next];
+    }
+    fat_info.file_alloc_table[next] = newcluster;
+    fprintf(debug, "new cluster : %d %x\n", newcluster, fat_info.addr_data + (newcluster - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector);
+    fflush(debug);
+
+    for (j = 0; j < consecutif; j++) {
+      int off = n_dir_entries - consecutif + j;
+      write_data(&fentry[j], sizeof(fat_dir_entry_t), fat_info.addr_data + (next - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector + off * sizeof(fat_dir_entry_t));
+    }
+    for (j = consecutif; j < n; j++) {
+      int off = n_dir_entries - consecutif + j;
+      write_data(&fentry[j], sizeof(fat_dir_entry_t), fat_info.addr_data + (newcluster - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector + off * sizeof(fat_dir_entry_t));
+    }
+    write_fat();
   }
 }
 
@@ -789,7 +834,7 @@ static int fat_mkdir (const char * path, mode_t mode) {
   fentry->ea_index = 0; //XXX
   convert_time_t_to_datetime_fat(t, &(fentry->last_modif_time), &(fentry->last_modif_date));
   fentry->file_size = 0;
-  fentry->cluster_pointer = alloc_cluster(1);
+  fentry->cluster_pointer = alloc_cluster(1); // TODO: vider cluster avant de l'utiliser.
 
   add_fat_dir_entry(dir, (fat_dir_entry_t*)long_file_name, n_entries + 1);
 
