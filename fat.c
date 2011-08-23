@@ -24,6 +24,18 @@ FILE* debug;
 
 static fat_info_t fat_info;
 
+static void write_data(void * buf, size_t count, off_t offset) {
+  int fd = open(options.device, O_WRONLY);
+  pwrite(fd, buf, count, offset);
+  close(fd);
+}
+
+static void read_data(void * buf, size_t count, off_t offset) {
+  int fd = open(options.device, O_RDONLY);
+  pread(fd, buf, count, offset);
+  close(fd);
+}
+
 static char * lfn_to_sfn(char * filename) {
   char * lfn = strdup(filename);
   char * sfn = malloc(12);
@@ -302,9 +314,7 @@ static void read_fat() {
   int p = 0;
   uint32_t tmp = 0;
 
-  int fd = open(options.device, O_RDONLY);
-  pread(fd, buffer, sizeof(buffer), fat_info.addr_fat[0]);
-  close(fd);
+  read_data(buffer, sizeof(buffer), fat_info.addr_fat[0]);
 
   if (fat_info.fat_type == FAT12) {
     // decodage FAT12
@@ -356,18 +366,16 @@ static void write_fat() {
     }
   }
  
-  int fd = open(options.device, O_RDONLY);
   for (i = 0; i < fat_info.BS.table_count; i++) {
-    pwrite(fd, buffer, sizeof(buffer), fat_info.addr_fat[i]);
+    write_data(buffer, sizeof(buffer), fat_info.addr_fat[i]);
   }
-  close(fd);
 }
 
 static void mount_fat() {
   fprintf(stderr, "Mount FAT.\n");
   int fd = open(options.device, O_RDONLY);
   if (fd > 0) {
-    pread(fd, &fat_info.BS, sizeof(fat_BS_t), 0);
+		pread(fd, &fat_info.BS, sizeof(fat_BS_t), 0);
     
     if (fat_info.BS.table_size_16 == 0) { // Si 0 alors on considère qu'on est en FAT32.
       fat_info.ext_BIOS_16 = NULL;
@@ -395,7 +403,7 @@ static void mount_fat() {
       fat_info.addr_fat[i] = (fat_info.BS.reserved_sector_count + i * fat_info.table_size) * fat_info.BS.bytes_per_sector;
     }
     fat_info.addr_root_dir = (fat_info.BS.reserved_sector_count + fat_info.BS.table_count * fat_info.table_size) * fat_info.BS.bytes_per_sector;
-    fat_info.addr_data = fat_info.addr_root_dir + (fat_info.BS.root_entry_count * 32);
+    fat_info.addr_data = fat_info.addr_root_dir + (fat_info.BS.root_entry_count * sizeof(fat_dir_entry_t));
     if (fat_info.BS.total_sectors_16 > 0)
       fat_info.total_data_clusters = fat_info.BS.total_sectors_16 / fat_info.BS.sectors_per_cluster - fat_info.addr_data / (fat_info.BS.bytes_per_sector * fat_info.BS.sectors_per_cluster);
     else
@@ -434,18 +442,6 @@ static void fat_dir_entry_to_directory_entry(char *filename, fat_dir_entry_t *di
       convert_datetime_fat_to_time_t(&dir->last_modif_date, &dir->last_modif_time);
   entry->creation_time = 
       convert_datetime_fat_to_time_t(&dir->create_date, &dir->create_time);
-}
-
-static void write_data(void * buf, size_t count, off_t offset) {
-  int fd = open(options.device, O_WRONLY);
-  pwrite(fd, buf, count, offset);
-  close(fd);
-}
-
-static void read_data(void * buf, size_t count, off_t offset) {
-  int fd = open(options.device, O_RDONLY);
-  pread(fd, buf, count, offset);
-  close(fd);
 }
 
 static directory_entry_t * decode_lfn_entry(lfn_entry_t* fdir) {
@@ -840,7 +836,7 @@ static int add_fat_dir_entry(char * path, fat_dir_entry_t *fentry, int n) {
       if (root_dir[i].utf8_short_name[0] == 0 || root_dir[i].utf8_short_name[0] == 0xe5) {
         consecutif++;
         if (consecutif == n) {
-          write_data(fentry, sizeof(fat_dir_entry_t) * n, fat_info.addr_root_dir + i * sizeof(fat_dir_entry_t));
+          write_data(fentry, sizeof(fat_dir_entry_t) * n, fat_info.addr_root_dir + (i - n + 1) * sizeof(fat_dir_entry_t));
           return 0;
         }
       }
