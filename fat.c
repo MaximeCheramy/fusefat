@@ -1090,6 +1090,38 @@ static int fat_write (const char *path, const char *buf, size_t size, off_t offs
   return count;
 }
 
+static int fat_mknod(const char * path, mode_t mode, dev_t dev) {
+	char * dir = malloc(strlen(path));
+  char filename[256];
+  split_dir_filename(path, dir, filename);
+
+  char * sfn = lfn_to_sfn(filename);
+  
+  int n_entries = 1 + ((strlen(filename) - 1) / 13);
+  lfn_entry_t * long_file_name = malloc(sizeof(lfn_entry_t) * (n_entries + 1));
+  fat_dir_entry_t *fentry = (fat_dir_entry_t*) &long_file_name[n_entries];
+
+  encode_long_file_name(filename, long_file_name, n_entries);
+
+  strncpy(fentry->utf8_short_name, sfn, 8);
+  strncpy(fentry->file_extension, sfn + 8, 3);
+  fentry->file_attributes = 0x0; //TODO: Utiliser variable mode.
+  fentry->reserved = 0;
+  fentry->create_time_ms = 0;
+  time_t t = time(NULL);
+  convert_time_t_to_datetime_fat(t, &(fentry->create_time), &(fentry->create_date));
+  convert_time_t_to_datetime_fat(t, NULL, &(fentry->last_access_date));
+  fentry->ea_index = 0; //XXX
+  convert_time_t_to_datetime_fat(t, &(fentry->last_modif_time), &(fentry->last_modif_date));
+  fentry->file_size = 0;
+  fentry->cluster_pointer = alloc_cluster(1);
+  init_dir_cluster(fentry->cluster_pointer);
+
+  add_fat_dir_entry(dir, (fat_dir_entry_t*)long_file_name, n_entries + 1);
+
+  write_fat();
+}
+
 static int fat_chmod(const char * path, mode_t mode) {
   return 0;
 }
@@ -1105,6 +1137,7 @@ static int fat_truncate(const char * path, off_t off) {
 static struct fuse_operations fat_oper = {
     .chmod = fat_chmod,
     .chown = fat_chown,
+		.mknod = fat_mknod,
     .getattr  = fat_getattr,
     .mkdir = fat_mkdir,
     .open = fat_open,
