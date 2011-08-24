@@ -354,8 +354,8 @@ static void write_fat() {
     }
   } else if (fat_info.fat_type == FAT16) {
     for (i = 0; i < fat_info.total_data_clusters; i++) {
-      buffer[i*4] = fat_info.file_alloc_table[i] & 0x00FF;
-      buffer[i*4 + 1] = fat_info.file_alloc_table[i] & 0xFF00;
+      buffer[i*2] = fat_info.file_alloc_table[i] & 0x00FF;
+      buffer[i*2 + 1] = fat_info.file_alloc_table[i] & 0xFF00;
     }
   } else if (fat_info.fat_type == FAT32) {
     for (i = 0; i < fat_info.total_data_clusters; i++) {
@@ -369,6 +369,43 @@ static void write_fat() {
   for (i = 0; i < fat_info.BS.table_count; i++) {
     write_data(buffer, sizeof(buffer), fat_info.addr_fat[i]);
   }
+}
+
+static void write_fat_entry(int index) {
+	int i;
+	if (fat_info.fat_type == FAT12) {
+		uint32_t tmp;
+		char buffer[3]; // 24 bits : 2 entries
+		if (index % 2 == 0) {
+      tmp = (fat_info.file_alloc_table[index + 1] << 12) + (fat_info.file_alloc_table[index] & 0xFFF);
+		} else {
+      tmp = (fat_info.file_alloc_table[index] << 12) + (fat_info.file_alloc_table[index - 1] & 0xFFF);
+		}
+    buffer[0] = tmp & 0x0000FF;
+    buffer[1] = tmp & 0x00FF00;
+    buffer[2] = tmp & 0xFF0000;
+
+		for (i = 0; i < fat_info.BS.table_count; i++) {
+			write_data(buffer, sizeof(buffer), fat_info.addr_fat[i] + index * 12);
+		}
+  } else if (fat_info.fat_type == FAT16) {
+		char buffer[2];
+    buffer[0] = fat_info.file_alloc_table[index] & 0x00FF;
+    buffer[1] = fat_info.file_alloc_table[index] & 0xFF00;
+		for (i = 0; i < fat_info.BS.table_count; i++) {
+			write_data(buffer, sizeof(buffer), fat_info.addr_fat[i] + index * 16);
+		}
+  } else if (fat_info.fat_type == FAT32) {
+		char buffer[4];
+    buffer[0] = fat_info.file_alloc_table[index] & 0x000000FF;
+    buffer[1] = fat_info.file_alloc_table[index] & 0x0000FF00;
+    buffer[2] = fat_info.file_alloc_table[index] & 0x00FF0000;
+    buffer[3] = fat_info.file_alloc_table[index] & 0xFF000000;
+		for (i = 0; i < fat_info.BS.table_count; i++) {
+			write_data(buffer, sizeof(buffer), fat_info.addr_fat[i] + index * 32);
+		}
+  }
+ 
 }
 
 static void mount_fat() {
@@ -511,6 +548,7 @@ static int alloc_cluster(int n) {
   for (i = 0; i < fat_info.total_data_clusters; i++) {
     if (fat_info.file_alloc_table[i] == 0) {
       fat_info.file_alloc_table[i] = next;
+			write_fat_entry(i);
       return i;
     }
   }
@@ -833,7 +871,6 @@ static int add_fat_dir_entry(char * path, fat_dir_entry_t *fentry, int n) {
         int off = n_dir_entries - consecutif + j;
         write_data(&fentry[j], sizeof(fat_dir_entry_t), fat_info.addr_data + (newcluster - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector + off * sizeof(fat_dir_entry_t));
       }
-      write_fat();
       return 0;
     }
   } else if (fat_info.fat_type != FAT32) {
@@ -901,8 +938,6 @@ static int fat_mkdir (const char * path, mode_t mode) {
   init_dir_cluster(fentry->cluster_pointer);
 
   add_fat_dir_entry(dir, (fat_dir_entry_t*)long_file_name, n_entries + 1);
-
-  write_fat();
 
   return 0;
 }
@@ -1129,7 +1164,7 @@ static int fat_mknod(const char * path, mode_t mode, dev_t dev) {
 
   add_fat_dir_entry(dir, (fat_dir_entry_t*)long_file_name, n_entries + 1);
 
-  write_fat();
+	return 0;
 }
 
 static int fat_chmod(const char * path, mode_t mode) {
