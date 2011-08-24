@@ -459,33 +459,43 @@ static directory_entry_t * decode_lfn_entry(lfn_entry_t* fdir) {
 }
 
 static directory_entry_t * decode_sfn_entry(fat_dir_entry_t *fdir) {
-  int j;
+  int j, k;
   char filename[256];
+	int notspace = 0;
 
   // Copy basis name.
-  for (j = 0; j < 8; j++) {
-    filename[j] = fdir->utf8_short_name[j];
+  for (j = 7; j >= 0; j--) {
+		if (notspace || fdir->utf8_short_name[j] != ' ') {
+			if (!notspace) {
+				notspace = j;
+			}
+			if (fdir->reserved && 0x08) {
+				filename[j] = tolower(fdir->utf8_short_name[j]);
+			} else {
+				filename[j] = fdir->utf8_short_name[j];
+			}
+		}
   }
   
-  // Remove trailing whitespaces.
-  j = 7;
-  while (j >= 0 && filename[j] == ' ') {
-    filename[j] = '\0';
-    j--;
-  }
+	notspace++; // notspace est la position du premier caractère != ' '
+  filename[notspace++] = '.';
 
+	int notspaceext = -2;
   // Copy extension.
-  filename[8] = '.';
-  for (j = 0; j < 3; j++) {
-    filename[9 + j] = fdir->file_extension[j];
+  for (k = 2; k >= 0; k--) {
+		if (notspaceext > 0 || fdir->file_extension[k] != ' ') {
+			if (notspaceext <= 0) {
+				notspaceext = k;
+			}
+			if (fdir->reserved && 0x10) {
+				filename[notspace + k] = tolower(fdir->file_extension[k]);
+			} else {
+				filename[notspace + k] = fdir->file_extension[k];
+			}
+		}
   }
 
-  // Remove trailing whitespaces in extension.
-  j = 2;
-  while (j >= 0 && filename[9 + j] == ' ') {
-    filename[9 + j] = '\0';
-    j--;
-  }
+	filename[notspace + notspaceext + 1] = '\0';
 
   directory_entry_t *dir_entry = malloc(sizeof(directory_entry_t));
   fat_dir_entry_to_directory_entry(filename, fdir, dir_entry);

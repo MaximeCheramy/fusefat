@@ -85,7 +85,7 @@ typedef struct {
   uint8_t   seq_number;
   uint8_t   filename1[10];
   uint8_t   attributes;
-  uint8_t   reserved; // always 0x0
+  uint8_t   reserved; // 0x08 : lowercase basename, 0x10 : lowercase extension
   uint8_t   checksum;
   uint8_t   filename2[12];
   uint16_t  cluster_pointer; // always 0x000
