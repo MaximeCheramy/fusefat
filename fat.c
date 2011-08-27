@@ -105,6 +105,7 @@ static char * lfn_to_sfn(char * filename) {
 
   // TODO: numeric-tail generation.
 
+	free(lfn);
   return sfn;
 }
 
@@ -598,7 +599,7 @@ static int updatedate_dir_entry(int cluster, char * filename, time_t accessdate,
           convert_time_t_to_datetime_fat(accessdate, NULL, &(fdir[i].last_access_date));
           convert_time_t_to_datetime_fat(modifdate, &(fdir[i].last_modif_time), &(fdir[i].last_modif_date));
           write_data(&fdir[i], sizeof(fat_dir_entry_t), fat_info.addr_data + (next - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector + i * sizeof(fat_dir_entry_t));
-  
+					free(fdir);
           return 0;
         }
         free(dir_entry);
@@ -623,6 +624,7 @@ static int updatedate_dir_entry(int cluster, char * filename, time_t accessdate,
           convert_time_t_to_datetime_fat(accessdate, NULL, &(fdir[i].last_access_date));
           convert_time_t_to_datetime_fat(modifdate, &(fdir[i].last_modif_time), &(fdir[i].last_modif_date));
           write_data(&fdir[i], sizeof(fat_dir_entry_t), fat_info.addr_root_dir + i * sizeof(fat_dir_entry_t));
+					free(fdir);
   
           return 0;
         }
@@ -805,6 +807,7 @@ static void init_dir_cluster(int cluster) {
   fat_dir_entry_t * dir_entries = calloc(n_dir_entries, sizeof(fat_dir_entry_t));
  
   write_data(dir_entries, sizeof(fat_dir_entry_t) * n_dir_entries, fat_info.addr_data + (cluster - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector);
+	free(dir_entries);
 }
 
 static int add_fat_dir_entry(char * path, fat_dir_entry_t *fentry, int n) {
@@ -1164,6 +1167,7 @@ static int fat_mknod(const char * path, mode_t mode, dev_t dev) {
 
   add_fat_dir_entry(dir, (fat_dir_entry_t*)long_file_name, n_entries + 1);
 
+	free(dir);
 	return 0;
 }
 
