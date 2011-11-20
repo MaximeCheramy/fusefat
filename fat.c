@@ -496,9 +496,8 @@ static directory_entry_t * decode_lfn_entry(lfn_entry_t* fdir) {
   return dir_entry;
 }
 
-static directory_entry_t * decode_sfn_entry(fat_dir_entry_t *fdir) {
+static void decode_short_file_name(char *filename, fat_dir_entry_t *fdir) {
   int j, k;
-  char filename[256];
 	int notspace = 0;
 
   // Copy basis name.
@@ -535,6 +534,12 @@ static directory_entry_t * decode_sfn_entry(fat_dir_entry_t *fdir) {
 
 	filename[notspace + notspaceext + 1] = '\0';
 
+
+}
+
+static directory_entry_t * decode_sfn_entry(fat_dir_entry_t *fdir) {
+  char filename[256];
+	decode_short_file_name(filename, fdir);
   directory_entry_t *dir_entry = malloc(sizeof(directory_entry_t));
   fat_dir_entry_to_directory_entry(filename, fdir, dir_entry);
   return dir_entry;
@@ -581,7 +586,7 @@ static int updatedate_dir_entry(int cluster, char * filename, time_t accessdate,
   
     int i;
     for (i = 0; i < n_dir_entries * n_clusters && fdir[i].utf8_short_name[0]; i++) {
-      if (fdir[i].utf8_short_name[0] != 0xE5) {
+      if ((unsigned char)fdir[i].utf8_short_name[0] != 0xE5) {
         if (fdir[i].file_attributes == 0x0F && ((lfn_entry_t*) &fdir[i])->seq_number & 0x40) {
           dir_entry = decode_lfn_entry((lfn_entry_t*) &fdir[i]);
           uint8_t seq = ((lfn_entry_t*) &fdir[i])->seq_number - 0x40;
@@ -611,7 +616,7 @@ static int updatedate_dir_entry(int cluster, char * filename, time_t accessdate,
  
     int i;
     for (i = 0; i < fat_info.BS.root_entry_count && fdir[i].utf8_short_name[0]; i++) {
-      if (fdir[i].utf8_short_name[0] != 0xE5) {
+      if ((unsigned char)fdir[i].utf8_short_name[0] != 0xE5) {
         if (fdir[i].file_attributes == 0x0F && ((lfn_entry_t*) &fdir[i])->seq_number & 0x40) {
           dir_entry = decode_lfn_entry((lfn_entry_t*) &fdir[i]);
           uint8_t seq = ((lfn_entry_t*) &fdir[i])->seq_number - 0x40;
@@ -637,12 +642,54 @@ static int updatedate_dir_entry(int cluster, char * filename, time_t accessdate,
   return 1;
 }
 
+static int delete_dir_entry(fat_dir_entry_t *fdir, const char *name, int n) {
+	fprintf(debug, "delete_dir_entry %s %d\n", name, n);
+	fflush(debug);
+  char filename[256];
+  int i;
+
+  for (i = 0; i < n && fdir[i].utf8_short_name[0]; i++) {
+		fprintf(debug, "> %s\n", fdir[i].utf8_short_name);
+    if ((unsigned char)fdir[i].utf8_short_name[0] != 0xE5) {
+      if (fdir[i].file_attributes == 0x0F && ((lfn_entry_t*) &fdir[i])->seq_number & 0x40) {
+
+			  int j;
+			  uint8_t i_filename = 0;
+			  uint8_t seq = ((lfn_entry_t*) &fdir[i])->seq_number - 0x40;
+			  for (j = seq-1; j >= 0; j--) {
+			    decode_long_file_name(filename + i_filename, (lfn_entry_t*) &fdir[i+j]);
+			    i_filename += 13;
+			  }
+
+				fprintf(debug, "cmp %s %s\n", filename, name);
+				fflush(debug);
+				if (strcmp(filename, name) == 0) {
+					for (j = seq; j >= 0; j--) {
+						fdir[i+j].utf8_short_name[0] = 0xE5;
+					}
+					return 0;
+				}
+        i += seq;
+      } else {
+        decode_short_file_name(filename, &fdir[i]);
+				if (strcmp(filename, name) == 0) {
+					fdir[i].utf8_short_name[0] = 0xE5;
+					return 0;
+				}
+      }
+    }
+  }
+	return 1;
+}
+
 static void read_dir_entries(fat_dir_entry_t *fdir, directory_t *dir, int n) {
+	fprintf(debug, "read_dir_entries\n");
+	fflush(debug);
   int i;
   for (i = 0; i < n && fdir[i].utf8_short_name[0]; i++) {
     directory_entry_t * dir_entry;
 
-    if (fdir[i].utf8_short_name[0] != 0xE5) {
+    if ((unsigned char)fdir[i].utf8_short_name[0] != 0xE5) {
       if (fdir[i].file_attributes == 0x0F && ((lfn_entry_t*) &fdir[i])->seq_number & 0x40) {
         dir_entry = decode_lfn_entry((lfn_entry_t*) &fdir[i]);
         uint8_t seq = ((lfn_entry_t*) &fdir[i])->seq_number - 0x40;
@@ -655,6 +702,52 @@ static void read_dir_entries(fat_dir_entry_t *fdir, directory_t *dir, int n) {
       dir->total_entries++;
     }
   }
+}
+
+static void delete_file_dir(int cluster, const char * name) {
+  int n_dir_entries = fat_info.BS.bytes_per_sector * fat_info.BS.sectors_per_cluster / sizeof(fat_dir_entry_t);
+	if (cluster >= 0) {
+
+	  int n_clusters = 0;
+	  int next = cluster;
+	  while (!is_last_cluster(next)) {
+	    next = fat_info.file_alloc_table[next];
+	    n_clusters++;
+	  }
+	
+	  fat_dir_entry_t * sub_dir = malloc(n_dir_entries * sizeof(fat_dir_entry_t) * n_clusters);
+	
+	  int c = 0;
+	  next = cluster;
+	  while (!is_last_cluster(next)) {
+	    read_data(sub_dir + c * n_dir_entries, n_dir_entries * sizeof(fat_dir_entry_t), fat_info.addr_data + (next - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector);
+	    next = fat_info.file_alloc_table[next];
+	    c++;
+	  }
+	
+		if (delete_dir_entry(sub_dir, name, n_dir_entries * n_clusters) == 0) {
+	
+			c = 0;
+			next = cluster;
+		  while (!is_last_cluster(next)) {
+				write_data(sub_dir + c * n_dir_entries, n_dir_entries * sizeof(fat_dir_entry_t), fat_info.addr_data + (next - 2) * fat_info.BS.sectors_per_cluster * fat_info.BS.bytes_per_sector);
+		    next = fat_info.file_alloc_table[next];
+		    c++;
+			}
+	
+		} else {
+			fprintf(debug, "delete_file_dir failed\n");
+		}
+	
+	} else {
+    fat_dir_entry_t *root_dir = malloc(sizeof(fat_dir_entry_t) * fat_info.BS.root_entry_count);
+    read_data(root_dir, sizeof(fat_dir_entry_t) * fat_info.BS.root_entry_count, fat_info.addr_root_dir);
+		if (delete_dir_entry(root_dir, name, n_dir_entries) == 0) {
+			write_data(root_dir, sizeof(fat_dir_entry_t) * fat_info.BS.root_entry_count, fat_info.addr_root_dir);
+		} else {
+			fprintf(debug, "delete_file_dir failed\n");
+		}
+	}
 }
 
 static void open_dir(int cluster, directory_t *dir) {
@@ -684,6 +777,8 @@ static void open_dir(int cluster, directory_t *dir) {
 }
 
 static directory_t * open_root_dir() {
+	fprintf(debug, "open_root_dir\n");
+	fflush(debug);
   directory_t *dir = malloc(sizeof(directory_t));
 
   if (fat_info.fat_type == FAT32) {
@@ -707,6 +802,7 @@ static directory_t * open_root_dir() {
 
 static int open_next_dir(directory_t * prev_dir, directory_t * next_dir, char * name) {
   fprintf(debug, "open_next_dir, name = %s\n", name);
+	fprintf(debug, "open_next_dir, prev_dir->cluster = %d\n", prev_dir->cluster);
   fflush(debug);
 
   int next = 0;
@@ -1183,6 +1279,46 @@ static int fat_truncate(const char * path, off_t off) {
   return 0;
 }
 
+static int fat_unlink(const char * path) {
+  if (path[0] == '\0' || strcmp(path, "/") == 0)
+    return -1;
+
+  // Only absolute paths.
+  if (path[0] != '/')
+    return -1;
+
+  char buf[256];
+  int i = 1;
+  while (path[i] == '/')
+    i++;
+
+  directory_t * dir = open_root_dir();
+
+  int j = 0;
+  do {
+    if (path[i] == '/' || path[i] == '\0') {
+      buf[j] = '\0';
+
+			int cluster = dir->cluster;
+      if (j > 0 && open_next_dir(dir, dir, buf) == 2) {
+				  fprintf(debug, "delete, name = %s\n", buf);
+					delete_file_dir(cluster, buf);
+				  fflush(debug);
+
+
+					return 0;
+			}
+
+      j = 0;
+    } else {
+      buf[j] = path[i];
+      j++;
+    }
+  } while (path[i++] != '\0');
+
+	return 1;
+}
+
 static struct fuse_operations fat_oper = {
     .chmod = fat_chmod,
     .chown = fat_chown,
@@ -1195,6 +1331,7 @@ static struct fuse_operations fat_oper = {
     .truncate = fat_truncate,
     .utimens = fat_utimens,
     .write = fat_write,
+		.unlink = fat_unlink,
 };
 
 int main(int argc, char *argv[])
